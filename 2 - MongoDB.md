@@ -43,6 +43,97 @@ There are two primary methods to split data:
 - Ranged sharding: Dividing data into continuous ranges based on shard key
 - Hashed sharding: Computes MD5 hash of shard key value to distribute data uniformly without creating hotspots (As seen in ranged sharding were all new writes will be clubbed together)
 
+### Read Concern / Write Concern
+
+MongoDB offers tunable consistency per operation, similar to Cassandra's consistency levels.
+
+**Read Concern** (controls data freshness):
+
+| Level | Description |
+|-------|-------------|
+| `local` | Default. Returns the most recent data on the primary. Stale reads possible on secondaries. |
+| `available` | Same as `local` but for sharded clusters; may return orphaned documents. |
+| `majority` | Returns data that has been acknowledged by the majority of replica set members. Guarantees no rollback. |
+| `linearizable` | Strongest. Ensures reads return the most recent write acknowledged by a majority. Slower. |
+| `snapshot` | Returns data from a point-in-time snapshot (used with transactions). |
+
+**Write Concern** (controls durability acknowledgment):
+
+| Level | Description |
+|-------|-------------|
+| `w: 1` | Default. Acknowledged by the primary only. |
+| `w: majority` | Acknowledged by majority of replica set members. |
+| `w: <n>` | Acknowledged by n members. |
+| `w: 0` | Fire-and-forget. No acknowledgment. Fastest, no durability guarantee. |
+| `j: true` | Forces journal (WiredTiger) commit to disk before acknowledgment. |
+| `wtimeout: <ms>` | Timeout if write concern is not met; operation fails without rollback. |
+
+```shell
+# Write with majority write concern
+db.collection_name.insertOne(
+  { name: "Alice" },
+  { writeConcern: { w: "majority", j: true, wtimeout: 5000 } }
+);
+
+# Read with majority read concern
+db.collection_name.find({ name: "Alice" }).readConcern("majority");
+```
+
+> `R + W > N` (MongoDB equivalent): Use `w: majority` writes and `readConcern("majority")` reads to ensure strong consistency.
+
+### Transactions and Rollback
+
+MongoDB supports **multi-document ACID transactions** (since 4.0 for replica sets, 4.2 for sharded clusters).
+
+```shell
+session = db.getMongo().startSession();
+session.startTransaction();
+
+try {
+  session.getDatabase("db1").collection("accounts").updateOne(
+    { _id: "alice" },
+    { $inc: { balance: -100 } }
+  );
+  session.getDatabase("db1").collection("accounts").updateOne(
+    { _id: "bob" },
+    { $inc: { balance: 100 } }
+  );
+  session.commitTransaction();
+} catch (e) {
+  session.abortTransaction();  // Rollback, undoes all changes
+}
+```
+
+**Rollback behavior outside transactions:**
+
+- If a **replica set primary election** occurs and an old primary rejoins with un-replicated writes, those writes are **rolled back**
+- Rolled-back data is written to a `rollback/` directory; an admin must manually apply it if needed
+- Use `w: majority` write concern to minimise rollback risk
+
+### Storage Engine (WiredTiger)
+
+MongoDB uses **WiredTiger** as its default storage engine (since 3.2).
+
+**Write path:**
+
+```
+Write → Journal (disk) → Cache (memory) → Periodic Checkpoint → Data Files (disk, B-tree)
+```
+
+- **Journal**: Write-ahead log for crash recovery. Applies every 50ms or 100MB.
+- **Cache**: In-memory B-tree cache (default 50% of RAM - 1GB). Reads and writes go through this cache.
+- **Checkpoint**: Every 60 seconds, the cache is synced to disk as a consistent snapshot.
+- **Data Files**: B-tree structured on disk (not LSM). No tombstones, updates are in-place with journal protection.
+
+**Compression:**
+- Data files: snappy (default) or zlib/zstd
+- Journal: snappy (default)
+
+**Key differences from Cassandra LSM:**
+- MongoDB updates **in-place** on checkpoint (no read amplification)
+- No tombstones (deletes remove data immediately)
+- No compaction required in the Cassandra sense, WiredTiger periodically reorganises B-tree pages
+
 ## MongoDB shell
 
 ### Creating database
@@ -152,6 +243,37 @@ db.collection_name.deleteOne({ ... })
 
 # Delete many
 db.collection_name.deleteMany([{ ... }, ...])
+```
+
+### TTL (Time-To-Live)
+
+Auto-delete documents after a specified time using a TTL index on a date field.
+
+```shell
+# Create TTL index: documents expire 86400 seconds (1 day) after createdAt
+db.collection_name.createIndex({ createdAt: 1 }, { expireAfterSeconds: 86400 })
+```
+
+```shell
+# Insert a document; it will auto-delete after 86400 seconds
+db.collection_name.insertOne({ data: "temp", createdAt: new Date() })
+```
+
+> The TTL index runs every 60 seconds. Documents may persist briefly past expiry.
+
+### Counter field
+
+No dedicated counter type; use `$inc` to atomically increment/decrement numeric fields.
+
+```shell
+# Increment
+db.collection_name.updateOne({ _id: docId }, { $inc: { view_count: 1 } })
+
+# Decrement
+db.collection_name.updateOne({ _id: docId }, { $inc: { view_count: -1 } })
+
+# Increment by arbitrary value
+db.collection_name.updateOne({ _id: docId }, { $inc: { score: 50 } })
 ```
 
 ### Supported datatypes for values

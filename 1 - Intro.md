@@ -217,7 +217,7 @@ General use-cases:
 - Profile management - Different users have completely different profiles depending on their accounts, settings, preferences, and activity
 - CMS systems - Handle diverse types of media, layouts, and revisions
 - Blogging platforms - Same as previous
-- real-time analytics - Real-time analytics involves capturing millions of incoming events—like user clicks, application logs, or temperature readings from IoT sensors—and calculating metrics on the fly.
+- real-time analytics - Real-time analytics involves capturing millions of incoming events (like user clicks, application logs, or temperature readings from IoT sensors) and calculating metrics on the fly.
 - e-commerce applications - In a store selling various items, say laptops and shirts - A laptop has parameters like RAM, CPU, Storage, and Battery. A t-shirt has Size, Color, Fabric, and Gender.
 
 MongoDb use-cases:
