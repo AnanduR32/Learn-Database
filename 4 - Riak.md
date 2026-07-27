@@ -314,3 +314,11 @@ Content-Type: application/json
 | R=QUORUM, W=QUORUM | Balance of consistency and availability |
 
 > Riak prioritizes **availability and partition tolerance** (AP in CAP theorem). Tune R/W/N values to trade consistency for latency and fault-tolerance.
+
+## Riak Core, KV, Search Summary
+
+**Riak Core** is the distributed systems foundation -- consistent hashing ring, vnodes, gossip protocol, hinted handoff. It provides the scalability and fault-tolerance primitives that everything else builds on.
+
+**Riak KV** is the main key-value store built on Core. It offers tunable consistency (R/W/N values), CRDTs, vector clocks, and pluggable backends (Bitcask, LevelDB). Use for session storage, user profiles, shopping carts, log aggregation.
+
+**Riak Search** (Yokozuna) is a full-text search layer on top of KV, powered by Apache Solr. It auto-indexes values on write and enables Solr queries. Use when you need to search within KV data by content rather than by key.
