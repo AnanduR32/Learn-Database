@@ -13,7 +13,7 @@ Follows BASE properties
 
 ## Hierarchical overview
 
-Data - inter-related -> Database - managed by -> DMBS
+Data - inter-related -> Database - managed by -> DBMS
 
 Types of DBMS system:
 
@@ -23,13 +23,13 @@ Types of DBMS system:
 
 ### SQL (RDBMS)
 
-Used for storing manipulating and retriving data
+Used for storing manipulating and retrieving data
 
 Uses,
 
 - Data Definition Language (DDL) - to create/modify schema
-  - create, drop, alter, trunate
-- Data Query Language (DQL) - to create/modify attributes
+  - create, drop, alter, truncate
+- Data Query Language (DQL) - to query/retrieve data
   - select
 - Data Manipulation Language (DML) - to insert/modify data
   - insert, update, delete
@@ -50,7 +50,7 @@ Uses,
 
 - Not null, primary key, foreign key, default, check
 - Can be applied during creation or alter existing
-- named constraints can be created using 'CONSTRAINT' keywork
+- named constraints can be created using 'CONSTRAINT' keyword
 
 #### Normalization
 
@@ -89,11 +89,11 @@ To speed up query (provides rapid random lookups)
     CREATE INDEX INDEX_NAME ON TABLE_NAME(COLUME_4);  -- METHOD 3
   ```
 
-- Droppign index
+- Dropping index
 
   ```sql
     ALTER TABLE TABLE_NAME DROP INDEX INDEX_NAME;
-  ````
+  ```
 
 - Renaming index
 
@@ -128,9 +128,9 @@ To speed up query (provides rapid random lookups)
   - The built-in routers and config servers maintains, splits, and balances the data across clusters/nodes
 - Eventual consistency accepted: Instead of forcing every server to update simultaneously before confirming a write, NoSQL databases often accept the write immediately on one node and replicate it to others asynchronously.
 
-#### CAP Theorm
+#### CAP Theorem
 
-CAP theorm highlights 3 main aspects of modern distributed systems
+CAP theorem highlights 3 main aspects of modern distributed systems
 
 - Consistency (C): Every read gets the same data from most recent write
 - Availability (A): Every request gets a response, even if it is not the latest data
@@ -258,7 +258,7 @@ General use-cases:
 - Caching
 - Storing personal data on specific domain. eg: Premium customers having their shard key stored
 - Product recommendations, storing personalized list for individual customers
-- Customized ad delivery to users based on ttheir profile
+- Customized ad delivery to users based on their profile
 - Supports atomic operations like INCR and EXPIRE, it is the industry standard for counting API requests in real time to stop DDoS attacks or API abuse.
 - Set property can be used to find mutual friends in social media platforms
 - zSets property can be used for tracking leaderboards
@@ -276,7 +276,7 @@ eg: BigTable, Cassandra, Hbase, CosmoDB
 Data is oriented in columns instead of rows  
   In column-oriented DBs, individual attributes (fields) are grouped together across all records, rather than keeping full individual records intact together on the disk.
 
-Best for OLAP (in contrast to reduce row oriented traditional SQL database which is best for OLTP)
+Best for OLAP (in contrast to row-oriented traditional SQL databases which are best for OLTP)
 
 Key mechanisms:
 

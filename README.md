@@ -10,8 +10,8 @@ Reference notes on NoSQL database concepts and practical commands.
 | 2 | `2 - MongoDB.md` | Document store - MongoDB shell, CRUD, filtering, TTL, counters |
 | 3 | `3 - Cassandra.md` | Wide-column store - CQL, architecture, consistency, SSTables, batches |
 | 4 | `4 - Riak.md` | Key-value store - HTTP API, CRDTs, vector clocks, storage backends |
+| 4.1 | `4.1 - Redis.md` | In-memory store - data structures, persistence, pub/sub, clustering |
 | 5 | `5 - Neo4j.md` | Graph database - Cypher QL, ACID transactions, index-free adjacency |
-| 6 | `6 - Redis.md` | In-memory store - data structures, persistence, pub/sub, clustering |
 
 ## Topics Covered per Database
 

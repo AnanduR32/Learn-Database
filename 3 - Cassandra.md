@@ -22,7 +22,7 @@ Cassandra Cluster -[1..n]-> Keyspace -[1..n]-> Table (Column Family) -[1..n]-> R
 - A cluster is the outermost container that spans one or more data centers
 - A keyspace is analogous to a database in RDBMS; it defines replication strategy and factor
 - A table (column family) stores rows, each with a primary key (mandatory)
-- A primary key in Cassandra consists of one or more partition keys and zero of more clustering key components.
+- A primary key in Cassandra consists of one or more partition keys and zero or more clustering key components.
 - The primary goal of partition key is to distribute data evenly across a cluster and query the data efficiently
 - Rows contain columns; columns are the smallest unit (name-value pair with a timestamp)
 - Columns can be static, clustering, or regular
@@ -96,19 +96,29 @@ WITH replication = {
 
 ### durable_writes
 
-- `durable_writes` is a keyspace-level option available only with **NetworkTopologyStrategy**
+- `durable_writes` is a keyspace-level option available for **any replication strategy** (SimpleStrategy or NetworkTopologyStrategy)
 - When set to `true` (default), writes are persisted to the commit log before applying to memtables, ensuring data durability
 - When set to `false`, writes bypass the commit log, improving write performance but risking data loss on node failure
-- Useful for non-critical or ephemeral keyspaces where some data loss is acceptable
 
 ```sql
+-- NetworkTopologyStrategy (only acceptable use of durable_writes = false)
 CREATE KEYSPACE keyspace_name
 WITH replication = {
   'class': 'NetworkTopologyStrategy',
   'datacenter1': 3
 }
 AND durable_writes = false;
+
+-- SimpleStrategy with durable_writes = false (strongly discouraged)
+CREATE KEYSPACE keyspace_name
+WITH replication = {
+  'class': 'SimpleStrategy',
+  'replication_factor': 1
+}
+AND durable_writes = false;
 ```
+
+> **Strongly advised against with SimpleStrategy**: SimpleStrategy is typically used in single-DC or development setups with low replication factors. Disabling `durable_writes` here means no commit log AND few replicas — a single node failure can cause permanent, unrecoverable data loss. Only consider `durable_writes = false` on NetworkTopologyStrategy keyspaces with RF ≥ 3, for non-critical/ephemeral data.
 
 ### Use keyspace
 

@@ -120,16 +120,18 @@ MongoDB uses **WiredTiger** as its default storage engine (since 3.2).
 Write → Journal (disk) → Cache (memory) → Periodic Checkpoint → Data Files (disk, B-tree)
 ```
 
-- **Journal**: Write-ahead log for crash recovery. Applies every 50ms or 100MB.
+- **Journal**: Write-ahead log for crash recovery. Commits every 100ms by default (configurable via `storage.journal.commitIntervalMs`, range 1–500ms).
 - **Cache**: In-memory B-tree cache (default 50% of RAM - 1GB). Reads and writes go through this cache.
 - **Checkpoint**: Every 60 seconds, the cache is synced to disk as a consistent snapshot.
 - **Data Files**: B-tree structured on disk (not LSM). No tombstones, updates are in-place with journal protection.
 
 **Compression:**
+
 - Data files: snappy (default) or zlib/zstd
 - Journal: snappy (default)
 
 **Key differences from Cassandra LSM:**
+
 - MongoDB updates **in-place** on checkpoint (no read amplification)
 - No tombstones (deletes remove data immediately)
 - No compaction required in the Cassandra sense, WiredTiger periodically reorganises B-tree pages
@@ -197,8 +199,8 @@ db.collection_name.find({ ... }).skip(offset_value:int)
 # Find one
 db.collection_name.findOne({ ... })
 
-# Find many
-db.collection_name.findMany({ ... })
+# find() returns a cursor over all matching documents (no findMany in MongoDB shell)
+db.collection_name.find({ ... })
 ```
 
 ### Inserting documents
@@ -216,7 +218,7 @@ db.collection_name.insertOne({ ... })
 db.collection_name.insertMany([{ ... }, ...])
 
 # Bulk write
-db.collection_name.BulkWrite([{ ... }, ...])
+db.collection_name.bulkWrite([{ ... }, ...])
 ```
 
 ### Updating documents
@@ -303,7 +305,7 @@ db.collection_name.updateOne({ _id: docId }, { $inc: { score: 50 } })
 - $ne : not equal
   
     ```json
-    { status: { $eq: "expired" } }
+    { status: { $ne: "active" } }
     ```
 
 - $or : or

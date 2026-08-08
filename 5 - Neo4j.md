@@ -26,7 +26,7 @@ Neo4j Instance -[1..n]-> Database -[1..n]-> Graph ->> (Node, Relationship, Prope
 
 ## Architecture
 
-- **Native graph storage**: Nodes and relationships are stored as fixed-size records with direct pointers (no index-free adjacency)
+- **Native graph storage**: Nodes and relationships are stored as fixed-size records with direct pointers
 - **Index-free adjacency**: Each node stores direct references to its relationships, traversals don't need global index lookups
 - **Page cache**: Memory-mapped file cache for fast read/write
 - **Transaction log**: Write-ahead log for crash recovery and replication
@@ -49,62 +49,62 @@ Cypher is Neo4j's declarative graph query language. It uses ASCII-art patterns t
 ### Creating nodes
 
 ```cypher
--- Create a node with label and properties
+// Create a node with label and properties
 CREATE (n:Person { name: 'Alice', age: 30 })
 ```
 
 ```cypher
--- Create multiple nodes
+// Create multiple nodes
 CREATE (a:Person { name: 'Alice' }), (b:Person { name: 'Bob' })
 ```
 
 ### Creating relationships
 
 ```cypher
--- Create a relationship between existing nodes
+// Create a relationship between existing nodes
 MATCH (a:Person { name: 'Alice' })
 MATCH (b:Person { name: 'Bob' })
 CREATE (a)-[:KNOWS { since: 2024 }]->(b)
 ```
 
 ```cypher
--- Create node + relationship in one go
+// Create node + relationship in one go
 CREATE (a:Person { name: 'Alice' })-[:KNOWS]->(b:Person { name: 'Bob' })
 ```
 
 ### Reading data (MATCH)
 
 ```cypher
--- Match all nodes with a label
+// Match all nodes with a label
 MATCH (n:Person) RETURN n
 
--- Match with property filter
+// Match with property filter
 MATCH (n:Person { name: 'Alice' }) RETURN n
 
--- Match with WHERE clause
+// Match with WHERE clause
 MATCH (n:Person)
 WHERE n.age > 25 AND n.name STARTS WITH 'A'
 RETURN n
 
--- Match relationships
+// Match relationships
 MATCH (a:Person { name: 'Alice' })-[:KNOWS]->(friends:Person)
 RETURN friends
 
--- Variable-length path (friends-of-friends, up to 2 hops)
+// Variable-length path (friends-of-friends, up to 2 hops)
 MATCH (a:Person { name: 'Alice' })-[:KNOWS*1..2]->(connections)
 RETURN connections
 
--- Optional match (like SQL LEFT JOIN)
+// Optional match (like SQL LEFT JOIN)
 MATCH (a:Person { name: 'Alice' })
 OPTIONAL MATCH (a)-[:KNOWS]->(b:Person)
 RETURN a, b
 
--- Aggregation
+// Aggregation
 MATCH (n:Person)
 RETURN n.age, count(*) AS count
 ORDER BY count DESC
 
--- Limit and skip
+// Limit and skip
 MATCH (n:Person)
 RETURN n
 ORDER BY n.name
@@ -115,15 +115,15 @@ LIMIT 5
 ### Updating data
 
 ```cypher
--- Set properties
+// Set properties
 MATCH (n:Person { name: 'Alice' })
 SET n.age = 31
 
--- Remove a property
+// Remove a property
 MATCH (n:Person { name: 'Alice' })
 REMOVE n.age
 
--- Add a label
+// Add a label
 MATCH (n:Person { name: 'Alice' })
 SET n:Employee
 ```
@@ -131,19 +131,19 @@ SET n:Employee
 ### Deleting data
 
 ```cypher
--- Delete a node (must have no relationships)
+// Delete a node (must have no relationships)
 MATCH (n:Person { name: 'Alice' })
 DELETE n
 
--- Delete a node and all its relationships
+// Delete a node and all its relationships
 MATCH (n:Person { name: 'Alice' })
 DETACH DELETE n
 
--- Delete a relationship only
+// Delete a relationship only
 MATCH (a:Person { name: 'Alice' })-[r:KNOWS]->(b:Person { name: 'Bob' })
 DELETE r
 
--- Delete all nodes and relationships (clear graph)
+// Delete all nodes and relationships (clear graph)
 MATCH (n)
 DETACH DELETE n
 ```
@@ -160,29 +160,29 @@ ON MATCH SET n.last_seen = timestamp()
 ### Indexes
 
 ```cypher
--- Create an index on a label + property (for equality lookups)
+// Create an index on a label + property (for equality lookups)
 CREATE INDEX person_name_index FOR (n:Person) ON (n.name)
 
--- Create a composite index
+// Create a composite index
 CREATE INDEX person_name_age_index FOR (n:Person) ON (n.name, n.age)
 
--- Drop index
+// Drop index
 DROP INDEX person_name_index IF EXISTS
 ```
 
 ### Constraints
 
 ```cypher
--- Uniqueness constraint (also creates an index)
+// Uniqueness constraint (also creates an index)
 CREATE CONSTRAINT unique_person_name FOR (n:Person) REQUIRE n.name IS UNIQUE
 
--- Node property existence constraint (Neo4j 4.x+)
+// Node property existence constraint (Neo4j 4.x+)
 CREATE CONSTRAINT person_age_exists FOR (n:Person) REQUIRE n.age IS NOT NULL
 
--- Relationship property existence constraint
+// Relationship property existence constraint
 CREATE CONSTRAINT knows_since_exists FOR ()-[r:KNOWS]-() REQUIRE r.since IS NOT NULL
 
--- Drop constraint
+// Drop constraint
 DROP CONSTRAINT unique_person_name IF EXISTS
 ```
 
