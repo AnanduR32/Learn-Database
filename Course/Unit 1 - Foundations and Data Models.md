@@ -1,7 +1,7 @@
 # Unit I — Relational Foundations, NoSQL Motivations & Data Models
 ### 25CSA642A — NoSQL Databases
 
-This unit builds the conceptual bridge from relational databases to NoSQL: it reviews why relational systems normalize data, shows *why* that design hits a scaling ceiling, formalizes the CAP theorem and the ACID→BASE relaxation that NoSQL trades for scale, then works through the four NoSQL data-model families (key-value, document, column-family, aggregate-oriented) before landing on MongoDB, Cassandra, and a systematic comparison against relational stores, HBase, and Neo4j.
+This unit builds the conceptual bridge from relational (SQL) databases to NoSQL. It reviews why traditional databases normalize data, explains why that design hits scaling limits, formalizes the CAP theorem and the ACID vs. BASE trade-offs, and walks through the four NoSQL data models (Key-Value, Document, Column-Family, and Graph) before exploring MongoDB, Cassandra, and database comparisons.
 
 **Roadmap of this file:**
 1. Relational Foundations Review — Queries, Constraints, Normalization, Functional Dependency, Indexing
@@ -19,436 +19,263 @@ This unit builds the conceptual bridge from relational databases to NoSQL: it re
 
 ## 1. Relational Foundations Review — Queries, Constraints, Normalization, Functional Dependency, Indexing
 
-### 1.1 Theory
+### 1.1 Core Concepts (Simplified)
 
-**The relational model:**
-- Data is represented as **relations** (tables): sets of tuples over named attributes.
-- Queried declaratively via SQL, which compiles to **relational algebra** operators:
-  - selection $\sigma$ — filter rows
-  - projection $\pi$ — choose columns
-  - join $\bowtie$ — combine tables on a predicate
-  - union, difference
-- **Constraints** enforce integrity:
-  - a **primary key** guarantees entity integrity (unique, non-null identifying attribute(s))
-  - a **foreign key** guarantees referential integrity (a value must exist as a primary key elsewhere)
-  - `CHECK`/`UNIQUE` enforce domain-specific rules
+**The Relational Model:**
+- Data is organized into **tables** (relations) consisting of rows (tuples) and columns (attributes).
+- Queried using **SQL**, which performs table operations like:
+  - **Selection ($\sigma$):** Filtering rows (like `WHERE`).
+  - **Projection ($\pi$):** Choosing specific columns (like `SELECT col1, col2`).
+  - **Join ($\bowtie$):** Combining multiple tables based on matching key columns.
 
-**Functional dependencies and normalization:**
-- A **functional dependency (FD)** $X \to Y$ holds if every pair of tuples agreeing on attributes $X$ also agrees on $Y$ — $X$ *functionally determines* $Y$.
-- FDs are the formal basis of **normalization**:
-  - **1NF** — atomic attribute values, no repeating groups
-  - **2NF** — no non-key attribute depends on only *part* of a composite key
-  - **3NF** — no non-key attribute depends *transitively* on the key via another non-key attribute
-  - **BCNF** — every determinant of a non-trivial FD is a candidate key (the strictest practical form)
+**Constraints:**
+- **Primary Key (PK):** A unique identifier for every row (cannot be null).
+- **Foreign Key (FK):** A reference column in one table pointing to a Primary Key in another table to maintain relationships.
+
+**Functional Dependencies (FD) & Normalization:**
+- A **Functional Dependency ($X \to Y$)** means if two rows have the same value for column $X$, they *must* have the same value for column $Y$ ($X$ determines $Y$).
+- **Normalization** rules structure tables to eliminate duplicate data:
+  - **1NF:** Every cell contains a single (atomic) value; no multi-value lists.
+  - **2NF:** Every non-key column must depend on the *entire* primary key, not just part of a composite key.
+  - **3NF:** No non-key column should depend on another non-key column (no indirect/transitive dependencies).
+  - **BCNF:** A stricter version of 3NF ensuring every determinant is a candidate key.
 
 **Indexing:**
-- Accelerates lookups. A **B-tree** index organizes keys into a balanced, sorted, multi-way tree.
-- A lookup touches only $O(\log_b n)$ nodes instead of scanning all $n$ rows.
+- Speeds up data lookups using a **B-tree** structure (a balanced search tree).
+- Instead of scanning all $n$ rows in a table, an index lookup finds a row in $O(\log n)$ steps.
 
-### 1.2 Proof — Armstrong's Axioms are sound, and BCNF decomposition is lossless
+### 1.2 Mathematical Proof — Armstrong's Axioms & Lossless Join
 
-**Soundness of Armstrong's axioms.** The three inference rules for FDs are:
-- *Reflexivity*: $Y\subseteq X \Rightarrow X\to Y$
-- *Augmentation*: $X\to Y \Rightarrow XZ\to YZ$
-- *Transitivity*: $X\to Y, Y\to Z \Rightarrow X\to Z$
+**Soundness of Armstrong's Axioms:**
+The three basic rules for deriving functional dependencies are:
+1. **Reflexivity:** If $Y$ is a subset of $X$, then $X \to Y$. (If you know a person's Full Name & DOB, you automatically know their DOB).
+2. **Augmentation:** If $X \to Y$, then $XZ \to YZ$. (Adding attribute $Z$ to both sides maintains the dependency).
+3. **Transitivity:** If $X \to Y$ and $Y \to Z$, then $X \to Z$. (If Student_ID determines Major, and Major determines Department_Head, then Student_ID determines Department_Head).
 
-Each follows directly from the definition of FD:
-- **Reflexivity** — if $Y\subseteq X$, any two tuples agreeing on all of $X$ automatically agree on the subset $Y$.
-- **Augmentation** — if two tuples agree on $XZ$, they agree on $X$, hence (by $X\to Y$) on $Y$; they already agree on $Z$, so they agree on $YZ$.
-- **Transitivity** — if two tuples agree on $X$, then (by $X\to Y$) they agree on $Y$, then (by $Y\to Z$) they agree on $Z$.
+*Proof Intuition:* Each rule logically follows directly from the definition of a functional dependency. Therefore, any dependency derived using these rules is guaranteed to be true (**sound**).
 
-Since every rule is a direct consequence of the FD definition applied to arbitrary tuple pairs, the axioms only ever derive *true* dependencies — they are **sound** (and, though not shown here, also complete: every true FD is derivable from them).
-
-**Lossless-join decomposition.**
-- Decomposing $R$ into $R_1, R_2$ is lossless iff $R_1\cap R_2 \to R_1$ or $R_1 \cap R_2 \to R_2$.
-- **Why:** naturally joining $R_1 \bowtie R_2$ always reconstructs *at least* the original tuples (any tuple of $R$ projects into matching rows of $R_1,R_2$ that rejoin).
-- **The risk:** *spurious* extra tuples from unrelated combinations sharing common $R_1\cap R_2$ values.
-- **The guarantee:** if $R_1\cap R_2 \to R_1$, each value of the shared attributes corresponds to *at most one* $R_1$-tuple, so joining it against any matching $R_2$-tuple cannot manufacture a new combination beyond what existed in $R$ — the join exactly reproduces $R$, no more, no less.
-- This theorem is what guarantees normalization never silently loses information.
+**Lossless-Join Decomposition:**
+When splitting a big table $R$ into two smaller tables $R_1$ and $R_2$, we must ensure no data or false combinations are created when rejoining them ($R_1 \bowtie R_2 = R$).
+- **Rule:** The split is lossless if the shared column(s) ($R_1 \cap R_2$) functionally determine either $R_1$ or $R_2$ (i.e., the shared column is a primary key in at least one of the new tables).
 
 ### 1.3 Worked Example
 
-Table `Orders(OrderID, CustomerID, CustomerName, ProductID, ProductName, Qty)` with FDs: `OrderID,ProductID → Qty`; `CustomerID → CustomerName`; `ProductID → ProductName`; `OrderID → CustomerID`. This violates 3NF/BCNF: `CustomerName` depends transitively on `OrderID` via `CustomerID` (a non-key attribute). Decompose into `Orders(OrderID, CustomerID)`, `Customers(CustomerID, CustomerName)`, `OrderItems(OrderID, ProductID, Qty)`, `Products(ProductID, ProductName)`. Each decomposition point shares a determinant (`CustomerID → Customers`, `ProductID → Products`) with the split, satisfying §1.2's lossless-join condition.
+Consider an unnormalized table: `Orders(OrderID, CustomerID, CustomerName, ProductID, ProductName, Qty)`.
+- **Dependencies:**
+  - `OrderID, ProductID` $\to$ `Qty`
+  - `CustomerID` $\to$ `CustomerName`
+  - `ProductID` $\to$ `ProductName`
+  - `OrderID` $\to$ `CustomerID`
+- **Problem:** `CustomerName` depends on `CustomerID` (violates 3NF/BCNF).
+- **Normalized Solution:** Split into 4 clean tables:
+  1. `Customers(CustomerID, CustomerName)`
+  2. `Products(ProductID, ProductName)`
+  3. `Orders(OrderID, CustomerID)`
+  4. `OrderItems(OrderID, ProductID, Qty)`
 
-### 1.4 Nuances
-
-- Normalization eliminates update/insert/delete anomalies but *increases* the number of joins needed to reconstruct a full record — exactly the cost NoSQL's aggregate model (§5, §7) is designed to avoid for read-heavy, single-entity access patterns.
-- Achieving both lossless-join **and** full dependency-preservation simultaneously is not always possible in BCNF; 3NF is the standard practical compromise.
-- Every index write-amplifies: each insert/update must maintain every index on the table — the same trade-off resurfaces for NoSQL secondary indexes (Unit III §5).
+### 1.4 Key Takeaways & Nuances
+- Normalization prevents data anomalies (accidental deletions/inconsistencies) but increases the number of `JOIN` operations needed to read full records.
+- Every index speeds up reads, but slows down writes (`INSERT`/`UPDATE`) because the B-tree must be updated on every change.
 
 ### 1.5 Real-World Application
-
-Relational schemas remain the standard for transactional systems — banking ledgers, inventory, ERP — where non-redundancy and multi-table consistency outweigh raw write throughput. Query planners exploit indexes to answer point/range lookups over millions of rows in milliseconds, which is the baseline every NoSQL indexing strategy (Unit III) is measured against.
+Relational databases (PostgreSQL, MySQL) are standard for transactional applications like banking and inventory where strict non-redundancy and multi-table integrity are essential.
 
 ---
 
 ## 2. Introduction to NoSQL — Motivations and the Scaling Problem
 
-### 2.1 Theory
+### 2.1 Core Concepts (Simplified)
+- **NoSQL ("Not Only SQL"):** Databases designed for horizontal scaling, flexible schemas, and high write/read speeds, relaxing traditional SQL guarantees (like joins or strict consistency).
+- **Scaling Strategies:**
+  - **Vertical Scaling ("Scale Up"):** Adding more RAM/CPUs to a single server. It quickly hits hardware limits and gets exponentially expensive.
+  - **Horizontal Scaling ("Scale Out"):** Adding more low-cost server machines (nodes) into a cluster.
 
-- "NoSQL" ("Not Only SQL") denotes databases that relax one or more relational guarantees — fixed schema, native joins, or immediate global consistency — in exchange for horizontal scalability, schema flexibility, and cost-effective handling of high-volume, high-velocity, semi-structured data.
-- Two scaling strategies exist:
-  - **Vertical scaling** — bigger machine; bounded by hardware ceilings and non-linear cost growth.
-  - **Horizontal scaling** — more machines; theoretically unbounded, but requires partitioning data and coordinating across nodes.
+### 2.2 Proof — Amdahl's Law Limits Single-Machine Scaling
+Amdahl's Law calculates the maximum speedup $S(N)$ obtained when using $N$ parallel processors for a workload where a fraction $p$ can be parallelized, leaving $(1-p)$ serial:
 
-### 2.2 Proof — Amdahl's Law bounds vertical/parallel scaling
+$$S(N) = \frac{1}{(1-p) + \frac{p}{N}}$$
 
-**Setup:** if a fraction $p$ of a workload is parallelizable and $(1-p)$ is inherently serial, the speedup from $N$ processors is:
-$$S(N) = \dfrac{1}{(1-p) + p/N}$$
-
-**Proof:**
-- On one processor the total time is $T = (1-p)T + pT$.
-- On $N$ processors, the serial part is unchanged but the parallel part divides evenly: time becomes $(1-p)T + pT/N$.
-- Speedup is the ratio of times, giving $S(N)$ above.
-- As $N\to\infty$, $S(N) \to \dfrac{1}{1-p}$ — a **hard ceiling** independent of how much hardware is added.
-
-**Why this matters:**
-- This proves why a single monolithic database server (or naive multi-core parallelism within one machine) plateaus: if 10% of the critical path is serial (one global lock, one write-ahead log), speedup can never exceed $10\times$.
-- NoSQL's answer is to eliminate the serial bottleneck itself by **partitioning data** (sharding) across independent nodes, each with its own lock and log.
-- $N$ independent shards approach *linear* scaling for shard-local operations, sidestepping Amdahl's ceiling entirely rather than fighting it.
+As $N \to \infty$, the maximum theoretical speedup reaches a hard limit of $\frac{1}{1-p}$.
+- *Intuition:* If 10% of a database operation must run sequentially (like waiting for a single global lock or write-ahead log), performance can **never exceed 10x**, no matter how powerful the machine is.
+- *NoSQL Solution:* NoSQL eliminates global locks by **partitioning (sharding)** data across independent machines, allowing linear horizontal scaling.
 
 ### 2.3 Worked Example
+If a query engine is 90% parallelizable ($p=0.9$):
+- With 10 CPUs: Speedup $= 5.26\times$
+- With 100 CPUs: Speedup $= 9.17\times$
+- Theoretical maximum speedup $= 10\times$
+By contrast, 10 independent NoSQL shards with non-overlapping data key ranges achieve nearly $10\times$ capacity, and an 11th shard adds another $\sim 1\times$ increment.
 
-With $p=0.9$ (90% parallelizable, typical of a single server's query engine): at $N=10$, $S=\frac{1}{0.1+0.09}=5.26\times$; at $N=100$, $S=\frac{1}{0.1+0.009}=9.17\times$; as $N\to\infty$, $S\to10\times$ — diminishing returns. Contrast 10 independently-sharded NoSQL nodes with disjoint key ranges and no shared serial bottleneck: they achieve close to $10\times$ throughput, and an 11th node keeps adding capacity, unlike the flattening curve above.
-
-### 2.4 Nuances
-
-- NoSQL is not "schema-less" in an absolute sense — schema is enforced by the application at read time ("schema-on-read") rather than by the database at write time ("schema-on-write", §1).
-- NoSQL sacrifices *something specific* — usually cross-entity joins, multi-record ACID transactions, or immediate global consistency (§3–4) — never "consistency and correctness" wholesale.
-- "NoSQL" spans four distinct data-model families (§5–7), each optimized for different access patterns; there is no single NoSQL model.
+### 2.4 Key Takeaways & Nuances
+- NoSQL is not "schema-less"; it uses **schema-on-read** (the application code interprets data when reading it) instead of **schema-on-write** (the database enforcing table constraints on insert).
 
 ### 2.5 Real-World Application
-
-Amazon's Dynamo paper (2007) and Google's Bigtable paper (2006) are the two works most directly responsible for the NoSQL movement — both were built because relational engines could not economically scale to Amazon's shopping-cart write volume or Google's web-index storage volume.
+Amazon built DynamoDB and Google built Bigtable because standard SQL engines could not economically scale to global e-commerce shopping carts or web indexing.
 
 ---
 
 ## 3. CAP Theorem
 
-### 3.1 Theory
+### 3.1 Core Concepts (Simplified)
+In a distributed database running across a network of machines, you can only guarantee **2 out of 3** properties at the same time:
+1. **Consistency (C):** Every read returns the most recent write or an error (Linearizability).
+2. **Availability (A):** Every request receives a non-error response (though it might contain slightly stale data).
+3. **Partition Tolerance (P):** The system continues operating despite network communication failures/delays between nodes.
 
-The CAP theorem (Brewer; formalized by Gilbert & Lynch, 2002) states that a distributed data store cannot simultaneously guarantee all three of:
-- **Consistency (C)** — every read returns the most recent write or an error (linearizability).
-- **Availability (A)** — every request receives a non-error response, though not necessarily the latest data.
-- **Partition tolerance (P)** — the system keeps operating despite arbitrary message loss/delay between nodes.
+Since physical networks inevitably experience cable drops or delays (**P is non-negotiable**), distributed databases must choose between **Consistency (CP)** or **Availability (AP)** during a network partition.
 
-Since network partitions are unavoidable in any real distributed system, P is effectively mandatory, making the practical choice **C vs. A during a partition**.
-
-### 3.2 Proof — Gilbert–Lynch impossibility (proof sketch)
-
-**Setup:** two replica nodes $G_1, G_2$ store value $v$, connected by a network capable of partitioning. Suppose, for contradiction, a system guarantees both C and A even under partition.
-
-**Argument:**
-- A client writes $v_1$ to $G_1$; the network partitions before $v_1$ replicates to $G_2$.
-- A second client then reads from $G_2$.
-- By **Availability**, $G_2$ must respond (no error/timeout).
-- By **Consistency**, that response must reflect $v_1$.
-- But $G_2$ has received no message from $G_1$ (the partition blocks all communication), so it has no way to know $v_1$ occurred — it can only return stale data or guess, violating Consistency.
-
-**Conclusion:** no algorithm can satisfy both C and A the instant a partition occurs; this is a **provable impossibility**, not an engineering shortfall, given that P is required.
+### 3.2 Proof — Gilbert & Lynch Impossibility Proof Sketch
+Suppose a network breaks, separating Node 1 and Node 2.
+1. A user writes new value $V_1$ to Node 1.
+2. Because of the network partition, Node 1 cannot send $V_1$ to Node 2.
+3. Another user reads from Node 2.
+4. If Node 2 responds immediately (for **Availability**), it returns stale data, violating **Consistency**.
+5. If Node 2 waits or errors out to maintain **Consistency**, it sacrifices **Availability**.
+*Conclusion:* A system cannot guarantee both C and A during a network partition.
 
 ### 3.3 Worked Example
+During a datacenter network failure:
+- **AP Choice (Riak / DynamoDB):** Shopping cart accepts items on both disconnected nodes; conflicting cart versions are merged later when the network recovers.
+- **CP Choice (HBase / MongoDB):** The disconnected node refuses reads/writes to prevent showing or recording out-of-date financial balances.
 
-Two data-center replicas of a shopping cart experience a mid-checkout partition. **AP** choice (Riak/Dynamo-style): both centers keep accepting cart updates independently; after the partition heals, conflicting versions are reconciled (vector clocks, Unit II §2). **CP** choice (HBase-style): the data center unable to reach a majority region simply refuses reads/writes until the partition heals, guaranteeing no stale cart is ever shown.
-
-### 3.4 Nuances
-
-- CAP is a **worst-case, partition-only** statement — absent a partition, a system can and usually does provide both C and A.
-- The **PACELC** extension (Abadi) refines this: *if Partitioned*, choose A or C; *Else* (normal operation), choose Latency or Consistency — capturing the latency/consistency trade-off that persists even without partitions (e.g., synchronous vs. asynchronous replication).
-- Choosing AP does not mean *no* consistency — it typically means **eventual consistency** (§4), a weaker but well-defined guarantee, not an absence of one.
-
-### 3.5 Real-World Application
-
-DynamoDB and Riak are classic **AP** systems (a shopping cart must always accept "add to cart," never error). Bigtable/HBase are **CP** (financial-ledger-adjacent workloads must never show two conflicting balances). Knowing which side of CAP a store occupies is the first question when selecting a NoSQL database for a given workload.
+### 3.4 Key Takeaways & Nuances
+- **PACELC Theorem:** Refines CAP by stating: **If Partitioned (P)**, choose between **A** and **C**; **Else (E)** (normal operations), choose between **Latency (L)** and **Consistency (C)**.
 
 ---
 
 ## 4. ACID vs BASE
 
-### 4.1 Theory
+### 4.1 Core Concepts (Simplified)
+- **ACID (SQL Defaults):**
+  - **Atomicity:** All operations in a transaction succeed, or all roll back.
+  - **Consistency:** Transactions preserve schema constraints and invariants.
+  - **Isolation:** Concurrent transactions don't interfere with each other.
+  - **Durability:** Committed changes survive system crashes.
+- **BASE (NoSQL Defaults):**
+  - **Basically Available:** The system stays online for reads/writes despite failures.
+  - **Soft state:** Data may change over time without explicit user action (due to background syncs).
+  - **Eventual consistency:** Given enough time without new updates, all nodes will converge to identical values.
 
-- **ACID** (traditional RDBMS transactions): Atomicity, Consistency, Isolation, Durability — a transaction is all-or-nothing, preserves invariants, is isolated from concurrent transactions, and survives crashes.
-- **BASE** (typical of AP NoSQL stores): **B**asically **A**vailable, **S**oft state, **E**ventual consistency — the system stays available for reads/writes almost always; internal state may be provisional; and, absent new writes, all replicas eventually converge.
-- Consistency in a replicated store is made **tunable** via quorum parameters:
-  - $N$ — replica count
-  - $W$ — write acknowledgements required
-  - $R$ — read acknowledgements required
+### 4.2 Proof — Quorum Math ($R + W > N$)
+In a cluster with $N$ total replicas for a key:
+- $W$ = Number of nodes that must confirm a write operation.
+- $R$ = Number of nodes queried during a read operation.
 
-### 4.2 Proof — quorum intersection ($R+W>N$) guarantees strong consistency
-
-**Claim:** if $R+W>N$, every read quorum intersects every write quorum, so at least one queried replica holds the latest committed write.
-
-**Proof:**
-- A write quorum is any subset of size $W$ from $N$ replicas; a read quorum is any subset of size $R$.
-- Two subsets of sizes $W$ and $R$ from a universe of size $N$ must intersect whenever $W+R>N$ — if disjoint, their union would have size $W+R \le N$, contradicting $W+R>N$.
-- By this pigeonhole argument, at least one replica belongs to both the write quorum that accepted the latest write and any read quorum, and (assuming version/timestamp comparison on read) that replica's value is returned.
-- Hence $R+W>N$ is **sufficient for read-your-writes consistency** on quorum-based stores (Riak, Cassandra, Dynamo).
-
-**Converse:** if $R+W\le N$, disjoint quorums are possible, and a read can miss every replica holding the newest write — exactly how "eventually consistent" (BASE) configurations arise (e.g., $R=W=1, N=3$: fast, but no freshness guarantee).
+**Theorem:** If $R + W > N$, every read set overlaps with at least one node from the latest write set.
+- *Proof (Pigeonhole Principle):* If you choose $W$ nodes out of $N$ for writing, and $R$ nodes out of $N$ for reading, and $R + W > N$, the two subsets *must* share at least 1 overlapping node. That node holds the latest write timestamp, guaranteeing **Strong Read-Your-Writes Consistency**.
+- If $R + W \le N$, reads might hit nodes that haven't received the write yet (**Eventual Consistency**).
 
 ### 4.3 Worked Example
-
-$N=3$ replicas. Strong-consistency configuration: $W=2, R=2$ ($W+R=4>3$) — every read is guaranteed fresh and tolerates one node failure. Eventually-consistent configuration: $W=1, R=1$ ($W+R=2\le3$) — writes/reads are fast (one acknowledgement needed) but a read can return a stale replica until anti-entropy/read-repair propagates the write to the remaining two.
-
-### 4.4 Nuances
-
-- ACID and BASE are **endpoints of a spectrum**, not a binary choice — many NoSQL stores let $N, R, W$ be dialed per-operation (Cassandra, Riak) rather than fixed globally.
-- "Eventual" consistency carries no time bound in the classical definition; real systems add read-repair, hinted handoff, and Merkle-tree anti-entropy to make convergence fast in practice.
-- Session-level guarantees (read-your-own-writes, monotonic reads) are commonly layered atop plain eventual consistency (e.g., sticky sessions to one replica) to keep BASE systems usable interactively.
-
-### 4.5 Real-World Application
-
-Banking core systems retain ACID (a transfer must never partially apply). Social-media "like" counters, view counts, and shopping carts use BASE — momentary staleness is an acceptable trade for always-on write availability at massive scale.
+With $N=3$ replicas:
+- **Strong Consistency:** $W=2, R=2$ ($2+2 = 4 > 3$). Every read hits at least 1 updated replica and tolerates 1 node failure.
+- **Eventual Consistency:** $W=1, R=1$ ($1+1 = 2 \le 3$). Extremely fast writes/reads, but reads can temporarily return old data.
 
 ---
 
-## 5. Types of NoSQL Databases — Key-Value and Document Data Models
+## 5. Types of NoSQL Databases — Key-Value and Document Models
 
-### 5.1 Theory
+### 5.1 Core Concepts (Simplified)
+- **Key-Value Model:** A massive distributed hash map (`get(key)` / `put(key, value)`). The database treats the value as an unreadable (opaque) byte blob.
+- **Document Model:** Stores structured records (JSON, BSON, XML). The database can inspect internal fields, index them, and run partial updates.
+- **Aggregate Unit:** A self-contained document holding an entity and its nested details, avoiding the need for multi-table relational joins.
 
-- The **key-value model** is a distributed hash map — `get(key)`/`put(key, value)` — where the value is an opaque blob the database cannot query internally without secondary indexing; it is the simplest, most horizontally scalable model.
-- The **document model** stores semi-structured documents (JSON/BSON/XML) whose internal fields the database *can* query, index, and partially update.
-- A document is an **aggregate**: a self-contained unit bundling what a relational schema would spread across several joined tables.
-
-### 5.2 Proof — the Aggregate Atomicity argument
-
-**Claim:** if all data needed for one business operation lives inside a single aggregate, that operation can be made atomic *without* a distributed transaction protocol, because it never crosses a shard boundary.
-
-**Proof sketch:**
-- A shard function $h(\text{key})$ maps each aggregate to exactly one physical node (consistent hashing, §9).
-- Any write touching only fields *within* one aggregate is, by construction, confined to the single node owning $h(\text{key})$.
-- That node applies the write under a local lock/write-ahead log exactly as a single-node database would, yielding atomicity and isolation for free.
-- The moment an operation must touch two aggregates hashing to two different nodes, atomicity requires a distributed protocol (two-phase commit, sagas) with the latency/availability costs implied by CAP (§3).
-
-This is the formal justification behind "design aggregate boundaries around transaction boundaries."
+### 5.2 Proof — Single-Aggregate Atomicity
+If all data for a business transaction (e.g., an Order and its Line Items) lives inside a single document/aggregate:
+- The database routes the document to a single server based on its Key's hash: $h(\text{key}) \to \text{Node}$.
+- Updates within that single document are completed locally using local locks/logs without requiring complex distributed multi-node commit protocols.
 
 ### 5.3 Worked Example
-
-Key-value: `put("cart:1042", "<opaque blob>")` — the store cannot answer "which carts contain product X" without scanning every value. Document (MongoDB-style):
+Instead of joining `Orders`, `OrderItems`, and `Customers` tables, a MongoDB document embeds everything together:
 ```json
-{ "_id": 1042, "customer": "Alice",
-  "items": [ {"sku": "A1", "qty": 2, "price": 9.99},
-             {"sku": "B7", "qty": 1, "price": 24.5} ] }
+{
+  "_id": 1042,
+  "customer": "Alice",
+  "items": [
+    {"sku": "A1", "qty": 2, "price": 9.99},
+    {"sku": "B7", "qty": 1, "price": 24.50}
+  ]
+}
 ```
-A single `updateOne({_id:1042}, {$push:{items: ...}})` is atomic — it never touches another customer's cart, so no cross-node coordination is required (§5.2 applies directly).
-
-### 5.4 Nuances
-
-- Aggregate design is a **modeling decision with lasting consequences**: over-large aggregates cause write contention and bloated payloads; over-fragmented aggregates reintroduce the multi-entity-transaction problem the model exists to avoid.
-- Document databases do support secondary indexes on nested fields (Unit III §5) — the "opaque blob" limitation is specific to pure key-value stores.
-- Aggregate design deliberately *reintroduces* redundancy (embedding) for atomicity and read-locality — the opposite of relational normalization's goal of eliminating redundancy (§1).
-
-### 5.5 Real-World Application
-
-Shopping carts, user sessions, and self-describing product catalogs are textbook aggregate use cases — one read/write retrieves everything a page needs in a single round trip, unlike a relational schema requiring several joined tables.
+Updating an item quantity in this single document is atomic and requires zero cross-server coordination.
 
 ---
 
 ## 6. Column-Family (Wide-Column) Stores
 
-### 6.1 Theory
+### 6.1 Core Concepts (Simplified)
+- Used by Apache Cassandra and Bigtable.
+- Organizes data into dynamic rows where each row key maps to column families and timestamped column values: `(row_key, column_family, column_qualifier, timestamp) -> value`.
+- Unlike SQL, rows in the same table do not need to have the same columns. Space is consumed only for populated cells (**sparse data**).
 
-- A **column-family** store (Bigtable/Cassandra/HBase lineage) organizes data as a sparse, distributed, multi-dimensional sorted map, keyed by `(row key, column family, column qualifier, timestamp) → value`.
-- Unlike a relational table, rows need not share the same columns, and columns are grouped into families stored contiguously on disk — optimized for **sparse data** and for reading only the columns needed.
-
-### 6.2 Proof — storage efficiency of sparsity
-
-**Claim:** for a table with $R$ rows and $C$ possible columns where each row populates only $k \ll C$ columns, a dense relational representation needs $O(R\times C)$ storage (every cell, including NULLs, is physically accounted for), while a column-family's sparse map needs only $O(R\times k)$.
-
-**Proof:**
-- The wide-column model stores a triple $(\text{row}, \text{column}, \text{value})$ only for cells that exist.
-- An absent column consumes zero bytes because the key `(row, column)` simply never appears, whereas a fixed-width relational row must reserve space (or a NULL bitmap) for every declared column regardless of population.
-- As $k/C \to 0$ (e.g., a web-crawl table with millions of possible "outbound-link" columns but a few dozen populated per page — Bigtable's original use case), the storage-saving factor $C/k$ becomes arbitrarily large.
-
-### 6.3 Worked Example
-
-Cassandra table `sensor_data` (partition key `sensor_id`, clustering column `reading_time`): the row for `sensor_id=42` might have columns `{temp, humidity}` at $t_1$ and `{temp, pressure}` at $t_2$ — no schema violation, no wasted storage for `pressure` at $t_1$ or `humidity` at $t_2$.
-
-### 6.4 Nuances
-
-- Column-family design pushes query patterns into the schema itself — tables are typically designed "query-first" (one denormalized table per query pattern), the opposite of relational "normalize first, query later" (§1).
-- Timestamps are first-class (Bigtable/HBase versioning), enabling built-in temporal queries ("value as of time $T$") without extra application logic.
-- Unbounded clustering keys (e.g., ever-appending event logs) can grow a row without limit — a known anti-pattern requiring bucketing strategies.
-
-### 6.5 Real-World Application
-
-Time-series/IoT telemetry, and Google's original use case — a sparse web-link graph spanning billions of URLs where any two pages share almost no common outbound-link columns — are canonical wide-column workloads.
+### 6.2 Proof — Sparse Storage Efficiency
+In SQL, a table with $R$ rows and $C$ columns uses $O(R \times C)$ memory allocations (reserving space or NULL bitmasks for unpopulated cells).
+In Wide-Column stores, only existing triples `(row, column, value)` are stored, consuming $O(R \times k)$ space where $k$ is the average number of populated columns per row. When $k \ll C$, storage savings are massive.
 
 ---
 
 ## 7. Aggregate-Oriented Databases
 
-### 7.1 Theory
+### 7.1 Core Concepts (Simplified)
+- "Aggregate-Oriented" is the umbrella term for Key-Value, Document, and Column-Family stores.
+- They group related pieces of data together into an **aggregate** (the primary unit for storage, sharding, and atomic updates), avoiding multi-table joins.
 
-- "Aggregate-oriented" (Sadalage & Fowler) is the unifying term for key-value, document, and column-family databases.
-- All three treat some **unit of data larger than a single value** as the atomic boundary for storage, replication, and sharding — unlike the relational model's atomic *row* plus cross-table joins.
-
-### 7.2 Proof — aggregates as the natural sharding unit
-
-**Claim:** if the shard function operates on aggregate keys, an operation confined to one aggregate contacts exactly one shard, while an operation spanning aggregates contacts $\ge 2$.
-
-**Proof:**
-- By definition, sharding assigns each aggregate wholly to one node via $h(\text{key})\to\text{node}$.
-- An operation's node fan-out equals the number of distinct aggregate keys it touches — 1 for a single-aggregate operation, $\geq2$ otherwise, directly from the shard map's definition.
-- Since cross-shard operations require coordination protocols with strictly worse latency/availability characteristics than single-shard operations (§3–4), **minimizing cross-aggregate operations is provably equivalent to minimizing coordination overhead**.
-
-This is the formal reason aggregate-oriented modeling effort focuses on matching aggregate boundaries to query/transaction patterns (§5.2).
-
-### 7.3 Worked Example
-
-An e-commerce system with aggregate-per-order (order + line items + shipping address embedded): "get order #500" is a single-shard read; "sum revenue across all orders" is a cross-shard scatter-gather — cheap operations are exactly those the aggregate boundary was designed around.
-
-### 7.4 Nuances
-
-- Aggregate orientation is *why* NoSQL databases generally lack general-purpose server-side joins — a join is, by definition, a cross-aggregate operation.
-- The "right" aggregate boundary is workload-dependent: the same entities (customer, order) might form one aggregate in an order-management app and separate aggregates in an analytics-heavy app.
-- Graph databases (Unit II) are the explicit exception to aggregate orientation — they optimize for *traversing* relationships between fine-grained entities rather than avoiding them.
-
-### 7.5 Real-World Application
-
-Every major cloud-native NoSQL offering (DynamoDB, Cosmos DB, MongoDB Atlas, managed Cassandra) bills and partitions by aggregate/partition key — cost and performance planning for these services is inseparable from correct aggregate design.
+### 7.2 Sharding Guarantee
+Because data is sharded by aggregate key ($h(\text{key}) \to \text{Node}$), any operation confined to a single aggregate contacts exactly **1 node**. Operations spanning multiple aggregates must fan out to $\ge 2$ nodes, incurring network latency.
 
 ---
 
-## 8. NoSQL Databases using MongoDB — Data Model and Queries
+## 8. NoSQL Databases using MongoDB — Data Model & Queries
 
-### 8.1 Theory
+### 8.1 Core Concepts (Simplified)
+- MongoDB stores data as **BSON** (Binary JSON) documents inside **collections**.
+- Queries filter collections using JSON criteria: `db.orders.find({ status: "shipped" })`.
 
-- MongoDB is a **document** database storing BSON (binary JSON) documents inside schema-flexible **collections** (loosely analogous to tables).
-- Queries are BSON filter documents evaluated against a collection, e.g. `db.orders.find({status: "shipped"})` — conceptually a relational-algebra selection $\sigma$ restricted to a single collection, with no native cross-collection join (mirroring §7.4).
-
-### 8.2 Proof — index lookup complexity
-
-- MongoDB's default index type is a B-tree; a lookup on an indexed field over $n$ documents costs $O(\log_b n)$ comparisons ($b$ = branching factor), versus $O(n)$ for a full collection scan (`COLLSCAN`).
-- This follows the standard B-tree height bound: a B-tree of branching factor $b$ storing $n$ keys has worst-case height $h=\lceil\log_b n\rceil$, since each level holds at most $O(b^{\text{level}})$ keys, giving $n \le O(b^h) \Rightarrow h \ge \log_b n$.
-- Each level costs one page access, bounding total lookup cost by $O(\log_b n)$ (developed fully in Unit III §5).
-
-### 8.3 Worked Example
-
-```
-db.orders.find({ "items.sku": "A1", status: "shipped" })
-```
-returns every order document with a line item `sku="A1"` and `status="shipped"` — a single-collection predicate scan (index-assisted if `items.sku` is indexed), with no join needed because line items are embedded (§5).
-
-### 8.4 Nuances
-
-- MongoDB's `$lookup` aggregation stage provides a left-outer-join-like operation for the rare cross-collection case, but it is comparatively expensive versus embedding — reinforcing §7's aggregate-boundary guidance.
-- Schema flexibility means a document missing a field is not rejected at write time by default; validation must be declared explicitly (JSON Schema validators) or enforced by the application (schema-on-read, §2.4).
-- Full query-language depth (operators, indexing, geospatial queries, upserts) with hands-on Python examples is developed in Unit III.
-
-### 8.5 Real-World Application
-
-Content-management systems, product catalogs, and mobile-app backends favor MongoDB's document model because data naturally arrives as nested JSON from client applications, avoiding an object-relational mapping translation layer.
+### 8.2 Index Lookup Complexity
+Searching documents sequentially costs $O(n)$ time (Full Collection Scan). Creating a B-tree index on a field reduces point/range lookup time to $O(\log n)$.
 
 ---
 
 ## 9. Column-Oriented NoSQL Databases using Apache Cassandra
 
-### 9.1 Theory
+### 9.1 Core Concepts (Simplified)
+- Cassandra uses a masterless, peer-to-peer ring architecture with no single point of failure.
+- A **partitioner** (Murmur3 hash) maps row keys onto positions along a circular ring to assign data to nodes.
 
-- Cassandra combines Bigtable's wide-column data model (§6) with Dynamo's decentralized, masterless, consistent-hashing architecture (no single point of failure).
-- Every node owns a range of the hash ring (via a **partitioner**, typically Murmur3), and rows are placed by hashing the partition key.
-
-### 9.2 Proof — consistent hashing's load-balance guarantee
-
-**Claim:** with consistent hashing over a ring of $N$ (pseudo-)uniformly placed nodes, adding or removing one node remaps only an expected $O(K/N)$ of $K$ keys, versus $O(K)$ for naive modulo hashing $h(\text{key}) \bmod N$.
-
-**Proof sketch:**
-- Consistent hashing assigns each key to the first node clockwise from its hash position.
-- Removing node $X$ affects only keys whose hash falls in the arc between $X$'s predecessor and $X$ — by uniform placement, this arc holds an expected fraction $1/N$ of the ring, i.e., $O(K/N)$ keys, all moving to exactly one neighboring node.
-- Contrast modulo hashing: changing $N\to N-1$ changes $\text{key}\bmod N$ for nearly every key, forcing an $O(K)$ full reshuffle.
-
-This is the structural reason (with **virtual nodes** smoothing load further) Cassandra clusters can resize online without a full data migration.
-
-### 9.3 Worked Example
-
-Ring positions (mod $360°$) for 4 nodes at $0°,90°,180°,270°$. A key hashing to $100°$ maps to the node at $180°$ (first clockwise). Removing the node at $180°$ remaps only keys in $(90°,180°]$ (one quarter of the ring, $K/4$ keys) — to the node at $270°$ — while all other keys are untouched.
-
-### 9.4 Nuances
-
-- Replication factor $RF$ places $RF-1$ additional replicas at the next $RF-1$ distinct clockwise nodes; combined with tunable per-query consistency levels (ONE, QUORUM, ALL), this directly applies the $N,R,W$ quorum math of §4.
-- CQL is SQL-like syntactically but model-restricted: queries must specify (or derive) the partition key — arbitrary `WHERE` clauses on non-indexed, non-partition columns are disallowed by default, since they would require a full-cluster scatter-gather.
-- The gossip protocol (peer-to-peer state dissemination) removes the coordinator single point of failure that master-based systems (HBase) retain, at the cost of eventual (not immediate) cluster-membership consistency.
-
-### 9.5 Real-World Application
-
-Cassandra powers write-heavy, globally-distributed workloads — Netflix's telemetry pipeline and large-scale messaging backends rely on its masterless, linearly-scalable write path.
+### 9.2 Proof — Consistent Hashing Rebalancing
+In naive modulo hashing ($h(\text{key}) \bmod N$), changing the node count from $N$ to $N+1$ forces almost **100% of keys ($O(K)$)** to move to new nodes.
+Under **Consistent Hashing**, adding or removing 1 node only remaps an expected fraction of $\frac{1}{N}$ keys ($O(K/N)$) to adjacent nodes on the ring, enabling seamless scaling without cluster-wide data re-shuffling.
 
 ---
 
-## 10. Comparison of Relational Databases to NoSQL Stores — MongoDB, Cassandra, HBase, Neo4j
+## 10. Comparison of Relational Databases to NoSQL Stores
 
-### 10.1 Theory
-
-| Dimension | RDBMS | MongoDB | Cassandra | HBase | Neo4j |
-|---|---|---|---|---|---|
-| Data model | Tables/rows | Documents | Wide-column | Wide-column | Property graph |
-| Schema | Fixed (schema-on-write) | Flexible | Flexible per-partition | Flexible | Flexible (labeled nodes/edges) |
-| Joins | Native relational algebra | `$lookup` (limited) | None (denormalize) | None | Native traversal |
-| CAP leaning | CP (single-node CA) | CP-leaning, tunable | AP-leaning, tunable | CP | CP (causal clustering) |
-| Query language | SQL | MQL (BSON queries) | CQL | Java API / scans | Cypher |
-
-### 10.2 Proof — the query-expressiveness trade-off
-
-- Relational algebra ($\sigma,\pi,\bowtie,\cup,-,\times$) is **relationally complete**: any first-order-logic query over the schema is composable from these operators (Codd's theorem).
-- Document/column-family query languages deliberately omit general $\bowtie$, because unrestricted joins require unbounded cross-shard coordination (§7.2).
-- Graph query languages (Cypher) specialize the opposite way: they make bounded-depth **traversal** along explicit relationship edges a first-class, optimized primitive, because a property graph physically stores relationships as direct pointers — traversing a stored edge is $O(1)$ (index-free adjacency), versus a relational join's $O(n\log n)$ or worse over unindexed foreign keys.
-
-### 10.3 Worked Example
-
-"Friends of friends": relationally, a self-join `Friends ⋈ Friends` costs $O(n\log n)$ (or better with an index per hop, compounding with each additional hop). In Neo4j, `MATCH (a:Person)-[:FRIEND]->()-[:FRIEND]->(b) RETURN b` walks stored relationship pointers directly from `a`, costing time proportional only to `a`'s actual connection count at each hop, independent of total graph size.
-
-### 10.4 Nuances
-
-- No system dominates — the comparison table encodes deliberate trade-offs; selection is a function of dominant access pattern (point lookups → key-value/document; wide scans/time-series → column-family; multi-hop relationships → graph; ad hoc joins/strong global consistency → relational).
-- Polyglot persistence — using multiple database types within one system, each for its strength — is standard modern practice, not an edge case.
-- HBase's dependence on an external coordination service (ZooKeeper) and a single active master per region shows "NoSQL" does not imply "no coordination point" — HBase is deliberately CP, trading availability for HDFS-grade consistency.
-
-### 10.5 Real-World Application
-
-A modern e-commerce platform might use PostgreSQL for order/payment ledgers (ACID), MongoDB for the product catalog (flexible schema), Cassandra for clickstream/session logs (write-heavy, AP), and Neo4j for "customers who bought this also bought" recommendations (graph traversal) — one company, four data models, each matched to its query pattern.
+| Feature | RDBMS (SQL) | MongoDB | Cassandra | Neo4j |
+|---|---|---|---|---|
+| **Data Model** | Tables & Rows | BSON Documents | Wide-Column | Property Graph |
+| **Schema** | Fixed (Schema-on-write) | Flexible | Flexible per partition | Flexible |
+| **Joins** | Native SQL `JOIN` | Limited (`$lookup`) | None (Denormalize) | Native Pointer Traversal |
+| **CAP Focus** | CP (Single-node CA) | CP-leaning | AP-leaning (Tunable) | CP |
+| **Primary Use** | Financial Ledgers / ERP | Web Catalogs / Content | Global Event Logs / IoT | Social & Fraud Networks |
 
 ---
 
-## Practice Problems (Exam-Style)
+## Practice Problems & Solutions
 
-**P1 — CAP scenario.** A shopping-cart service is deployed across two datacenters and the link between them drops. Should it prioritize C or A? Justify.
-
-*Solution:* **Choose AP.** A cart must always accept adds/removes (§4's BASE argument) — rejecting a write because the other datacenter is unreachable would lose the sale. Reconcile the two divergent cart copies later (vector clocks / CRDT merge, Unit II §1), rather than blocking writes during the partition.
-
-**P2 — Quorum design.** With $N=5$ replicas, pick $(R,W)$ for strong read-your-writes consistency, and show why $(R,W)=(1,1)$ fails.
-
-*Solution:* Need $R+W>N=5$. **$(R,W)=(3,3)$** works: $3+3=6>5$, guaranteeing every read quorum overlaps every write quorum by at least one replica. $(1,1)$ gives $1+1=2\le5$ — a read can hit a replica that never saw the latest write, returning stale data (§4's quorum math).
-
-**P3 — Normalization / functional dependency.** Table `Orders(OrderID, CustomerName, CustomerAddress, ProductID, ProductName, Price)` has FDs `OrderID→CustomerName, CustomerAddress` and `ProductID→ProductName, Price`. Decompose to 3NF.
-
-*Solution:* `CustomerAddress` depends on `CustomerName`, not the whole key `OrderID` — a partial/transitive dependency. Decompose into: `Customers(CustomerID, CustomerName, CustomerAddress)`, `Products(ProductID, ProductName, Price)`, `Orders(OrderID, CustomerID, ProductID)` — each non-key attribute now depends only on its own table's full key (§1's normalization argument).
-
-**P4 — Embed vs. reference.** A blog post can accumulate 10,000+ comments. Should comments be embedded in the post document?
-
-*Solution:* **Reference, don't embed.** MongoDB documents cap at 16MB (§5's aggregate-boundary theory); an unbounded, ever-growing comment array risks hitting that limit and makes every post fetch drag along all comments. Store comments in a separate collection referencing `postID`, paginated on read — trading single-query embedding convenience for bounded document size.
-
-**P5 — Cassandra table design.** Design a table for sensor readings queried by "last 24 hours for device X."
-
-*Solution:* `PRIMARY KEY ((device_id), timestamp)`. `device_id` as the **partition key** spreads writes evenly across the ring (§9's consistent-hashing); `timestamp` as the **clustering key** sorts each partition so a range query `WHERE device_id=X AND timestamp > ?` is a fast sequential scan within one partition — no cross-partition scatter-gather.
-
-**P6 — Database selection.** A financial ledger needs multi-row ACID transactions but has modest write volume. Which model?
-
-*Solution:* **Relational** (or a document store with explicit multi-document transaction support). Per §3–4, ledger consistency requirements (no partial transfers) outweigh the horizontal-scale benefits AP stores offer — the workload doesn't need the throughput that would justify trading away strong consistency.
+1. **CAP Choice:** A mobile cart app loses connection to its primary datacenter. Should it prioritize C or A?
+   * *Solution:* Prioritize **Availability (AP)**. Allow customers to add items to their local cart, and resolve conflicting cart versions once connection is restored.
+2. **Quorum Calculation:** For $N=5$ replicas, pick $(R, W)$ values for strong consistency.
+   * *Solution:* Choose **$R=3, W=3$**. Since $R + W = 6 > 5$, read and write quorums are guaranteed to overlap.
+3. **Index Selection:** Given index `{status: 1, date: -1}`, does it optimize `find({date: "2026-01-01"})`?
+   * *Solution:* **No.** The query skips the prefix field (`status`), violating the B-tree compound index prefix rule.
 
 ---
 
-## Unit I Summary
+## Unit I Summary Cheat-Sheet
 
-| Concept | One-line takeaway |
+| Concept | Key Takeaway |
 |---|---|
-| Relational review | Normalization removes redundancy at the cost of joins |
-| NoSQL motivations | Horizontal scale-out escapes Amdahl's-law-bounded vertical scaling |
-| CAP theorem | Partition tolerance is mandatory; C and A cannot both hold during a partition |
-| ACID vs BASE | Quorum math ($R+W>N$) tunes the consistency/availability trade-off |
-| Key-value / document | Aggregates make single-document atomicity free; cross-aggregate ops need coordination |
-| Column-family | Sparse storage: pay only for populated cells |
-| Aggregate-oriented | Shard-by-aggregate minimizes cross-node coordination |
-| MongoDB | Document model with B-tree-indexed, join-light queries |
-| Cassandra | Consistent hashing gives $O(K/N)$ rebalancing on node change |
-| Relational vs NoSQL | Joins vs. index-free adjacency: relational completeness vs. traversal specialization |
+| **Normalization** | Eliminates duplicate data but makes reads slower due to `JOIN`s. |
+| **Amdahl's Law** | Proves single-server parallel speedup is capped by serial code sections. |
+| **CAP Theorem** | When network partitions occur, you must pick between Consistency or Availability. |
+| **Quorum Formula** | $R + W > N$ guarantees you always read fresh data. |
+| **Consistent Hashing** | Adding/removing nodes remaps only $O(K/N)$ keys instead of re-shuffling everything. |
