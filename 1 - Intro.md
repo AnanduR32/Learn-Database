@@ -86,7 +86,7 @@ To speed up query (provides rapid random lookups)
       ...
       INDEX (COLUMN_2, COLUMN_3)                      -- METHOD 2
     )
-    CREATE INDEX INDEX_NAME ON TABLE_NAME(COLUME_4);  -- METHOD 3
+    CREATE INDEX INDEX_NAME ON TABLE_NAME(COLUMN_4);  -- METHOD 3
   ```
 
 - Dropping index
@@ -109,53 +109,51 @@ To speed up query (provides rapid random lookups)
 
 #### Limitations
 
-- Requires structure and schema inorder to process data
-- ACID properties - performance overhead
-- Majority of applications use JSON format for data, which is unsupported
-- Distribution - sharding/replicas is slow in response due to the ACID compliance overhead
-  - In distributed data, joins are slow due to network overhead
-- Additonal complexity for developers to setup
+- Requires structure and schema in order to process data
+- ACID properties - performance and coordination overhead in distributed environments
+- Legacy relational engines were not designed natively for nested JSON/hierarchical document trees
+- Distribution - sharding and cross-node replication face latency overhead to maintain strict serializability
+  - In distributed data, cross-node joins are slow due to network overhead
+- Additional complexity for developers to migrate schemas continuously
 
 ### NoSQL (Not only SQL)
 
-- Non-relational databases
-- Generally used in Big Data and realtime web applications
-- Allows storage of large volumes of structured, semi-structured and unstructured data
-- Allows using flexible schema
-- Build to be distributed out of the box
-- No concept of constraints and joins, ACID compliance, Group by etc.
-  - A document contains all information
-  - The built-in routers and config servers maintains, splits, and balances the data across clusters/nodes
-- Eventual consistency accepted: Instead of forcing every server to update simultaneously before confirming a write, NoSQL databases often accept the write immediately on one node and replicate it to others asynchronously.
+- Non-relational, distributed-first databases
+- Generally used in Big Data, real-time web applications, IoT, and high-throughput systems
+- Allows storage of large volumes of structured, semi-structured (JSON/BSON), and unstructured data
+- Employs dynamic/flexible schemas (schema-on-read rather than schema-on-write)
+- Built to scale horizontally across commodity clusters out of the box
+- Design philosophy favors denormalization (aggregates) over relational joins:
+  - An aggregate/document embeds related information to allow single-node atomic reads/writes
+  - Built-in partitioners, routers, and cluster coordinators manage data balancing automatically
+- Eventual consistency accepted by default: Writes can be acknowledged quickly on replica subsets and propagated asynchronously, though modern systems provide tunable consistency levels.
+- **Modern Nuance**: While early NoSQL avoided ACID entirely, modern NoSQL provides selective ACID transactions (e.g., MongoDB multi-document ACID transactions, Cassandra Lightweight Transactions via Paxos, Neo4j full ACID), pipeline joins (e.g., MongoDB `$lookup`), and schema validation rules (`$jsonSchema`).
 
 #### CAP Theorem
 
-CAP theorem highlights 3 main aspects of modern distributed systems
+CAP theorem highlights 3 main guarantees of distributed systems:
 
-- Consistency (C): Every read gets the same data from most recent write
-- Availability (A): Every request gets a response, even if it is not the latest data
-- Partition Tolerance (P): The system keeps working even if some nodes cannot communicate
+- **Consistency (C)**: Every read receives the most recent write or an error (Linearizability)
+- **Availability (A)**: Every non-failing node returns a response for every request, without guaranteeing it contains the most recent write
+- **Partition Tolerance (P)**: The system continues to operate despite arbitrary network message loss or delays between nodes
 
-In practice, a distributed system can provide only 2 of the 3 guarantees at the same time.
+In practice, because physical networks cannot guarantee 100% reliable communication (**Partition Tolerance is mandatory**), distributed systems must trade off between Consistency and Availability during a partition:
 
-- CA: SQLServer, MySQL, Oracle, MariaDB
-- CP: HBase, MongoDB, Big table, Memcache
-- AP: Riak, Cassandra, CouchDB
+- **CP (Consistency + Partition Tolerance)**: MongoDB (default primary writes), Apache HBase, Google Cloud Bigtable
+- **AP (Availability + Partition Tolerance)**: Apache Cassandra (tunable), Riak KV, CouchDB, Amazon DynamoDB (default)
+- **CA (Consistency + Availability)**: Traditional single-node RDBMS (MySQL, PostgreSQL, Oracle) operate in CA mode because there is no distributed network partition; however, across a distributed cluster, true CA is impossible when partitions occur.
+- **PACELC Extension**: **I**f **P**artitioned $\to$ choose **A** or **C**; **E**lse $\to$ choose **L**atency or **C**onsistency.
 
-NoSQL databases usually prioritize Availability and Partition Tolerance, accepting eventual consistency.
+**ACID properties**: Essential for transactional systems (e.g., banking ledgers)
+- SQL: PostgreSQL, MySQL, Oracle, SQLite, SQL Server
+- NoSQL with native ACID: Neo4j (graph ACID), MongoDB (multi-document ACID since 4.0/4.2), CouchDB
 
-**ACID properties**: Mandatorily used in FinTech systems
+**BASE**: Architectural model for highly available NoSQL distributed databases
+- **BA** (**B**asically **A**vailable): Distributed system remains operational for requests despite node failures
+- **S** (**S**oft State): System state may change over time due to background replica convergence without explicit writes
+- **E** (**E**ventually Consistent): In the absence of new mutations, all replicas converge to identical values over time
 
-- SQL: MySQL, PostGreSQL, Oracle, SQLite, SQL Server
-- NoSQL: Apache CouchDB, IBM DB2
-
-**BASE**: For NoSQL distributed databases
-
-- **BA** (**B**asically **A**vailable): Respond to every request
-- **S** (**S**oft State): Data may change over time without requiring additional writes
-- **E** (**E**ventually Consistent): The system converges to a consistent state after some time, rather than immediately
-
-eg: MongoDB, Cassandra, Redis, DynamoDB, Couchbase
+eg: Cassandra, Riak, Redis, DynamoDB, Couchbase
 
 #### Types
 
@@ -266,36 +264,36 @@ General use-cases:
 Redis use-cases:
 
 - Pinterest uses Redis heavily for graph data and list management. They use Redis to track user relationships (who follows whom) and boards using Redis data structures like Sets and Sorted Sets.
-- X (Twitter) uees to manage it's timeline - When a user tweets, X doesn't dynamically fetch that tweet when their followers log in. Instead, they use a Fanout process. The system takes the new tweet and injects it directly into the in-memory Redis Lists of all the user's active followers. (List queues employed)
+- X (Twitter) uses Redis to manage its timeline - When a user tweets, X doesn't dynamically fetch that tweet when their followers log in. Instead, they use a Fanout process. The system takes the new tweet and injects it directly into the in-memory Redis Lists of all the user's active followers. (List queues employed)
 
-##### column databases
+##### Column-Family / Wide-Column databases
 
-Stores data in columns and rows optimized for large-scale analytics.
-eg: BigTable, Cassandra, Hbase, CosmoDB
+Stores data in columns and rows optimized for massive scale, sparse matrices, and write-heavy telemetry.
+eg: Apache Cassandra, ScyllaDB, Google Cloud Bigtable, Apache HBase, Azure Cosmos DB
 
-Data is oriented in columns instead of rows  
-  In column-oriented DBs, individual attributes (fields) are grouped together across all records, rather than keeping full individual records intact together on the disk.
+Data is oriented around column families rather than rigid tabular rows:
+  In wide-column stores, each row key maps to an arbitrary number of dynamic, timestamped columns. Space is only allocated for populated values.
 
-Best for OLAP (in contrast to row-oriented traditional SQL databases which are best for OLTP)
+Best for high-throughput write workloads and time-series analytics (in contrast to traditional row-oriented RDBMS designed for localized transactional CRUD).
 
 Key mechanisms:
 
-- Has better query performance as the database engine needs to only load the particular columns on which the query is being performed, whereas in row oriented DBs the entire row with all the columns need to be loaded. Thus column databases have better I/O speeds
-- Is better at compression, in column DBs the column contains the same datatype and are stored together. The database engine can use algorithms such as Run-Length Encoding or Dictionary Encoding to compress data heavily - saving massive amount of storage space.
-- Aggregation functions run at much higher speeds since the columns can be passed in chunks and executed using SIMD (Single Instruction Multiple Data) processing pipelines
+- Has better query performance for targeted columns, avoiding scanning unrequested attributes across wide records.
+- Is better at compression: columns of uniform data types can use algorithms such as Run-Length Encoding (RLE) or Dictionary Encoding, saving massive disk space.
+- Employs Log-Structured Merge (LSM) trees for append-only sequential writes to disk, delivering lightning-fast write performance.
 
-Hierarchial representation:  
+Hierarchical representation:  
 
 ```json
- Database
+ Database (Cluster)
     |  
- Keyspace     : outermost container of application data, grouping related data models together  
+ Keyspace     : Outermost container of application data, defining replication factor and strategy  
     |  
-Column family : each column family is stored together on disk  
+ Table / Column family : Stored together on disk (SSTables)  
     |  
-   Rows       : Each identified by unique row key or partition key  
+   Rows       : Each identified by a unique Partition Key (determines node location) and optional Clustering Keys (determines on-disk sorting)  
     |  
-  Column      : Each row can have different column count
+   Columns    : Smallest unit of data (Name, Value, Timestamp)
 ```
 
 eg:  
@@ -316,11 +314,26 @@ eg:
           // Notice: No "role" or "skills" columns here. Entirely different column count!
 ```
 
-**Cassandra usecases:**
+**Cassandra use cases:**
 
-- Spotify data storage, to store metadata on artist, songs user profile parameters.
+- Spotify: User playlists, listening history, and recommendation metadata.
+- Netflix: Global viewing history and bookmark state synchronized across multi-region datacenters.
+- IoT & Telemetry: Sensor time-series telemetry streams using composite time-window keys.
 
 ##### Graph databases
 
-Stores data as connected nodes and relationships.
-eg: Neo4j, OrientDB
+Stores data as connected nodes, relationships (edges), and properties, implementing the **Labeled Property Graph** model.
+eg: Neo4j, Amazon Neptune, Memgraph, OrientDB
+
+Key mechanisms:
+
+- **Index-Free Adjacency**: Each node stores direct memory pointers to adjacent relationships. Traversing relationships is $O(1)$ constant time per hop, completely independent of the total graph size.
+- **Declarative Graph Queries**: Cypher query language uses visual ASCII-art pattern matching `(a)-[:RELATION]->(b)` to express complex graph traversals.
+- **ACID Compliance**: Full ACID transaction support ensures strict consistency during relationship and property mutations.
+
+General use cases:
+
+- Social Networks: Friend-of-a-friend discovery, mutual connections, follower graph.
+- Recommendation Engines: Collaborative filtering based on shared interests and purchase paths.
+- Fraud Detection: Uncovering circular transactions, synthetic identity rings, and shared financial attributes.
+- Knowledge Graphs & GraphRAG: Semantic entity networks for AI retrieval-augmented generation.

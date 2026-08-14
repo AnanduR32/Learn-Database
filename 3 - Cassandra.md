@@ -57,12 +57,29 @@ Consistency level is set **per query**, each read and write can choose its own.
 | `SERIAL` | Linearizable consistency for reads/writes, checks for pending transactions before responding. Used with lightweight transactions (`IF NOT EXISTS` / `IF`). |
 | `LOCAL_SERIAL` | Same as `SERIAL` but restricted to the local data center. |
 
-**Write consistency** example:
+**Setting consistency level:**
+
+In `cqlsh` shell, consistency is set as a session command prior to query execution:
 
 ```sql
--- Insert with LOCAL_QUORUM consistency
-INSERT INTO users (id, name) VALUES (uuid(), 'Alice')
-USING CONSISTENCY LOCAL_QUORUM;
+-- Set consistency level in cqlsh
+CONSISTENCY LOCAL_QUORUM;
+
+-- Execute write query
+INSERT INTO users (id, name) VALUES (uuid(), 'Alice');
+```
+
+In application drivers (e.g., Python DataStax driver), consistency is set on the execution statement:
+
+```python
+from cassandra import ConsistencyLevel
+from cassandra.query import SimpleStatement
+
+query = SimpleStatement(
+    "INSERT INTO users (id, name) VALUES (%s, %s)",
+    consistency_level=ConsistencyLevel.LOCAL_QUORUM
+)
+session.execute(query, (user_id, 'Alice'))
 ```
 
 > Rule of thumb: `W + R > RF` ensures strong consistency for reads-after-writes. E.g., `RF=3, W=QUORUM(2), R=QUORUM(2)` guarantees at least one overlapping replica.
@@ -421,6 +438,96 @@ Cassandra **does not support rollback**. There is no `ROLLBACK` command.
 - Batches are **anti-pattern for performance**, they increase coordinator load and latency
 - Never use batches to batch unrelated writes; they were designed for atomic updates within a single partition
 - Large batches (> 5-10 KB) cause pressure on the coordinator; keep them small
+
+### Lightweight Transactions (LWT — Paxos Consensus)
+
+Cassandra provides linearizable, compare-and-set (CAS) operations using a 4-phase Paxos consensus protocol (`SERIAL` consistency).
+
+#### 1. Conditional Insert (`IF NOT EXISTS`)
+```sql
+-- Creates user only if ID does not already exist
+INSERT INTO users (id, name, email)
+VALUES (uuid(), 'Alice', 'alice@example.com')
+IF NOT EXISTS;
+```
+
+#### 2. Conditional Update (`IF condition`)
+```sql
+-- Atomically deduct balance only if sufficient funds exist
+UPDATE accounts
+SET balance = balance - 100
+WHERE user_id = 'user_101'
+IF balance >= 100;
+```
+
+#### 3. Conditional Delete (`IF EXISTS` or `IF condition`)
+```sql
+DELETE FROM users WHERE id = some_uuid IF EXISTS;
+```
+
+> **Performance Trade-off**: LWT requires 4 network round-trips (Prepare $\to$ Promise $\to$ Propose $\to$ Accept) per mutation instead of 1. Use sparingly for unique registration or state locks, not for high-throughput streaming.
+
+### Working with Collections & User-Defined Types (UDT)
+
+#### 1. Sets (Unordered, Unique elements)
+```sql
+CREATE TABLE users (
+  id UUID PRIMARY KEY,
+  emails set<text>
+);
+
+-- Add items to set
+UPDATE users SET emails = emails + {'alice@work.com'} WHERE id = some_uuid;
+
+-- Remove items from set
+UPDATE users SET emails = emails - {'alice@old.com'} WHERE id = some_uuid;
+```
+
+#### 2. Lists (Ordered elements)
+```sql
+CREATE TABLE user_activity (
+  user_id UUID PRIMARY KEY,
+  recent_logs list<text>
+);
+
+-- Append to list (tail)
+UPDATE user_activity SET recent_logs = recent_logs + ['login_success'] WHERE user_id = some_uuid;
+
+-- Prepend to list (head)
+UPDATE user_activity SET recent_logs = ['session_start'] + recent_logs WHERE user_id = some_uuid;
+```
+
+#### 3. Maps (Key-Value pairs)
+```sql
+CREATE TABLE products (
+  sku text PRIMARY KEY,
+  specs map<text, text>
+);
+
+-- Add or update specific key in map
+UPDATE products SET specs['ram'] = '32GB', specs['cpu'] = 'M3 Max' WHERE sku = 'PRO-01';
+```
+
+#### 4. User-Defined Types (UDTs)
+```sql
+-- Create custom type
+CREATE TYPE address (
+  street text,
+  city text,
+  zip_code int
+);
+
+-- Use frozen UDT in table
+CREATE TABLE clients (
+  id UUID PRIMARY KEY,
+  name text,
+  home_address frozen<address>
+);
+
+-- Insert UDT literal
+INSERT INTO clients (id, name, home_address)
+VALUES (uuid(), 'Bob', { street: '123 Tech Lane', city: 'Seattle', zip_code: 98101 });
+```
 
 ### SSTables and Storage
 

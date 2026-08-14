@@ -1,146 +1,210 @@
 # Unit III — Advanced MongoDB Application Development with Python & Web Frameworks
 ### 25CSA642A — NoSQL Databases
 
-This unit moves from MongoDB concepts to hands-on software development: connecting via PyMongo, running CRUD operations and operators, managing B-tree and Geospatial indexes, executing atomic upserts, building aggregation pipelines, understanding replication/sharding, and integrating MongoDB with Flask and Django.
+This unit moves from MongoDB theoretical foundations to production-grade software development: connecting via PyMongo, executing nuanced CRUD and field modification operations, managing B-tree, Compound, and Geospatial indexes, executing atomic upserts and positional array updates, building multi-stage aggregation pipelines, understanding replica sets/sharding, and integrating MongoDB with Flask and Django.
 
 **Roadmap of this file:**
-1. Connecting to MongoDB with Python (PyMongo)
-2. MongoDB Query Language — Find, Update, Delete Operations
-3. MongoDB Query Operators
-4. Using Indexes with MongoDB
-5. GeoSpatial Indexing
-6. Upserts in MongoDB
-7. Aggregation Framework, Replication, and Sharding
-8. Document Database with Web Frameworks — Django and MongoDB
-9. Document Database with Web Frameworks — Flask and MongoDB
+1. Connecting to MongoDB with Python (PyMongo) & Connection Pooling
+2. Nuanced MongoDB Document Operations — Adding, Updating, Removing & Renaming Fields
+3. Array Modifications & Positional Update Operators (`$`, `$[]`, `$[elem]`)
+4. Query Operators & Filtering
+5. Using Indexes with MongoDB — Compound Prefix Rule & Geospatial Indexing
+6. Atomic Upserts & Find-and-Modify Operations
+7. The Aggregation Framework — Single-Purpose Aggregations & Multi-Stage Pipelines
+8. Document Database with Web Frameworks — Django & MongoEngine ODM
+9. Document Database with Web Frameworks — Flask & PyMongo REST API
 
 ---
 
-## 1. Connecting to MongoDB with Python (PyMongo)
+## 1. Connecting to MongoDB with Python (PyMongo) & Connection Pooling
 
 ### 1.1 Core Concepts (Simplified)
-- **PyMongo:** Official Python driver for MongoDB.
-- **`MongoClient` Object:** Manages database connection pooling and translates Python dictionaries to/from BSON (Binary JSON).
-- **Connection Pooling Best Practice:** Instantiate `MongoClient` **once** at application startup, not inside individual HTTP request handlers or loops.
+- **PyMongo:** The official thread-safe Python driver for MongoDB.
+- **`MongoClient` Connection Pool:** Manages a pool of persistent TCP socket connections and translates Python native dictionaries into BSON (Binary JSON) formats.
+- **Connection Pooling Best Practice:** Instantiate `MongoClient` **exactly once** as a global or application singleton at startup. Avoid instantiating `MongoClient` inside request handlers or loops.
 
 ### 1.2 Proof — Connection Pooling Amortization
-Establishing a new network connection requires TCP and TLS handshakes, costing a fixed setup time $c$.
-- **Without Pooling:** Executing $m$ operations opens $m$ connections, paying setup cost $m \times c$.
-- **With Pooling:** A shared pool of size $k$ pays the setup cost $k \times c$ once. Subsequent operations reuse open sockets at $O(1)$ setup cost. As $m \to \infty$, amortized connection overhead per operation approaches $0$.
+Establishing a new database connection requires TCP 3-way handshakes and TLS cryptographic handshakes, costing a fixed setup latency $c \approx 50-100\text{ms}$.
+- **Without Connection Pooling:** Executing $m$ operations establishes $m$ individual connections, paying total setup overhead $m \times c$.
+- **With Connection Pooling:** A pre-warmed pool of size $k$ pays the setup cost $k \times c$ once. Subsequent operations check out active sockets in $O(1)$ time. As total operations $m \to \infty$, the amortized connection setup overhead per query approaches **zero**:
+$$\lim_{m \to \infty} \frac{k \cdot c + m \cdot t_{\text{exec}}}{m} = t_{\text{exec}}$$
 
 ### 1.3 Worked Code Example
 ```python
 from pymongo import MongoClient
 
-# Create a single client connection pool once at startup
-client = MongoClient("mongodb://localhost:27017/")
-db = client["ecommerce"]
-orders = db["orders"]
+# Single client instance initialized once at application startup
+client = MongoClient(
+    "mongodb://localhost:27017/",
+    maxPoolSize=50,
+    minPoolSize=10,
+    serverSelectionTimeoutMS=5000
+)
 
-# Operations reuse open pooled connections automatically
-shipped_order = orders.find_one({"status": "shipped"})
-print(shipped_order)
+db = client["ecommerce_db"]
+orders_collection = db["orders"]
+
+# Query automatically borrows and returns a socket to the pool
+order = orders_collection.find_one({"status": "shipped"})
+print(order)
 ```
 
 ---
 
-## 2. MongoDB Query Language — Find, Update, Delete Operations
+## 2. Nuanced MongoDB Document Operations — Adding, Updating, Removing & Renaming Fields
 
-### 2.1 Core Concepts (Simplified)
-- **CRUD Operations:**
-  - **Create:** `insert_one()`, `insert_many()`
-  - **Read:** `find_one()`, `find()`
-  - **Update:** `update_one()`, `update_many()` with `$set`
-  - **Delete:** `delete_one()`, `delete_many()`
-- **Partial Updates (`$set`):** Modifies only the specified fields, leaving all other fields intact.
+### 2.1 Updating Fields & Adding New Columns
 
-### 2.2 Proof — Commutativity of Disjoint Field Updates
-If two users simultaneously update different fields on the same document:
-- User 1 applies `{"$set": {"status": "shipped"}}`
-- User 2 applies `{"$set": {"tracking_code": "TRK123"}}`
-Because MongoDB applies updates at the BSON field level, these operations commute (apply in any order with identical results) without overwriting each other's changes.
+MongoDB documents are dynamic. You can add new attributes (columns) or modify existing ones without altering collection-wide schemas.
 
-### 2.3 Worked Code Example
+#### 1. Adding a New Column / Field
+Use `$set` with a field name that does not currently exist:
 ```python
-# Partial Update: Only updates 'status', leaves all other fields intact
-orders.update_one({"_id": 1042}, {"$set": {"status": "shipped"}})
+# Adds 'is_verified' and 'joined_date' to a single user document
+db.users.update_one(
+    {"_id": user_id},
+    {"$set": {"is_verified": True, "joined_date": datetime.utcnow()}}
+)
 
-# Bulk Delete: Removes all cancelled orders older than cutoff date
-orders.delete_many({"status": "cancelled", "createdAt": {"$lt": cutoff_date}})
+# Adds a default 'loyalty_tier' column to ALL documents missing this attribute
+db.users.update_many(
+    {"loyalty_tier": {"$exists": False}},
+    {"$set": {"loyalty_tier": "bronze"}}
+)
+```
+
+#### 2. Updating a Singular Column / Field
+Use `$set` with an existing field name to update only that targeted value:
+```python
+# Modifies only 'email' and 'status', leaving all other document fields untouched
+db.users.update_one(
+    {"_id": user_id},
+    {"$set": {"email": "alice.new@example.com", "status": "active"}}
+)
+
+# Updating nested sub-document fields using dot notation (must be string-quoted)
+db.users.update_one(
+    {"_id": user_id},
+    {"$set": {"profile.address.city": "San Francisco", "profile.preferences.dark_mode": True}}
+)
+```
+
+#### 3. Removing / Dropping a Column (`$unset`)
+To completely delete one or more fields from a document:
+```python
+# Deletes 'temp_token' and 'legacy_id' from the document
+db.users.update_one(
+    {"_id": user_id},
+    {"$unset": {"temp_token": "", "legacy_id": ""}}
+)
+```
+
+#### 4. Renaming a Field / Column (`$rename`)
+```python
+# Renames 'phone_no' to 'phone_number' across all matching documents
+db.users.update_many(
+    {},
+    {"$rename": {"phone_no": "phone_number"}}
+)
+```
+
+#### 5. Numeric & Arithmetic Operations (`$inc`, `$mul`, `$min`, `$max`)
+```python
+# Atomic Increment / Decrement
+db.products.update_one({"_id": product_id}, {"$inc": {"stock": -1, "views": 1}})
+
+# Multiply value (e.g., apply 10% discount)
+db.products.update_one({"_id": product_id}, {"$mul": {"price": 0.90}})
+
+# $min: Updates only if specified value is LESS than current field value
+db.drivers.update_one({"_id": driver_id}, {"$min": {"fastest_lap": 52.4}})
+
+# $max: Updates only if specified value is GREATER than current field value
+db.gamers.update_one({"_id": gamer_id}, {"$max": {"high_score": 12500}})
 ```
 
 ---
 
-## 3. MongoDB Query Operators
+## 3. Array Modifications & Positional Update Operators
 
-### 3.1 Core Concepts (Simplified)
-- **Comparison Operators:** `$eq`, `$ne`, `$gt` (>), `$gte` ($\ge$), `$lt` (<), `$lte` ($\le$), `$in`, `$nin`.
+MongoDB treats arrays as first-class nested structures.
+
+### 3.1 Basic Array Updates (`$push`, `$addToSet`, `$pull`, `$pop`)
+```python
+# $push: Appends an element (duplicates allowed)
+db.posts.update_one({"_id": post_id}, {"$push": {"tags": "nosql"}})
+
+# $addToSet: Adds an element ONLY IF it doesn't already exist (Set behavior)
+db.users.update_one({"_id": user_id}, {"$addToSet": {"roles": "admin"}})
+
+# $pull: Removes all occurrences matching the criteria
+db.posts.update_one({"_id": post_id}, {"$pull": {"tags": "deprecated"}})
+```
+
+### 3.2 Positional Array Operators (`$`, `$[]`, `$[<identifier>]`)
+```python
+# 1. First Matched Element ($): Updates the first array item matching the query filter
+db.students.update_one(
+    {"_id": student_id, "grades.subject": "Math"},
+    {"$set": {"grades.$.score": 95}}
+)
+
+# 2. All Array Elements ($[]): Increments bonus points for every item in the array
+db.students.update_one(
+    {"_id": student_id},
+    {"$inc": {"grades.$[].bonus_points": 5}}
+)
+
+# 3. Filtered Elements ($[elem] + array_filters): Updates only elements matching custom condition
+db.students.update_one(
+    {"_id": student_id},
+    {"$set": {"grades.$[elem].letter_grade": "A+"}},
+    array_filters=[{"elem.score": {"$gte": 90}}]
+)
+```
+
+---
+
+## 4. Query Operators & Filtering
+
+- **Comparison Operators:** `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`.
 - **Logical Operators:** `$and`, `$or`, `$not`, `$nor`.
 - **Element Operators:** `$exists`, `$type`.
-- **Array Operators:** `$elemMatch` (checks if a single array element matches all criteria), `$all`, `$size`.
+- **Array Operators:** `$elemMatch` (verifies multiple conditions on the *same* array element), `$all`, `$size`.
 
-### 3.2 Worked Code Example
 ```python
-# Find shipped orders with total > 100, excluding blocked customers
+# Array query: Find orders containing at least one item with category 'electronics' and price > 100
 orders.find({
-    "status": "shipped",
-    "total": {"$gt": 100},
-    "customerId": {"$nin": blocked_customer_ids}
+    "status": "completed",
+    "items": {
+        "$elemMatch": {
+            "category": "electronics",
+            "price": {"$gt": 100}
+        }
+    }
 })
-
-# Array query: Find orders containing at least one item with qty >= 5
-orders.find({"items": {"$elemMatch": {"qty": {"$gte": 5}}}})
 ```
 
 ---
 
-## 4. Using Indexes with MongoDB
+## 5. Using Indexes with MongoDB — Compound Prefix Rule & Geospatial Indexing
 
-### 4.1 Core Concepts (Simplified)
-- **Indexes:** B-tree structures built on fields to avoid scanning every document ($O(n) \to O(\log n)$).
-- **Index Types:** Single-Field, Compound, Multikey (for array fields), Text, and Hashed (for sharding).
-- **The Compound Index Prefix Rule:** An index on `(A, B, C)` can serve queries filtering on:
-  - `(A)`
-  - `(A, B)`
-  - `(A, B, C)`
-  - ❌ It **cannot** efficiently serve queries filtering on `(B)` or `(C)` alone because the index is sorted by `A` first.
+### 5.1 The Compound Index Prefix Rule
+An index on `(A, B, C)` sorts entries lexicographically by $A$ first, then $B$, then $C$.
+- ✅ Optimizes queries on `(A)`, `(A, B)`, and `(A, B, C)`.
+- ❌ **Cannot** optimize queries filtering on `(B)` or `(C)` alone because the search cannot skip the leading prefix $A$.
 
-### 4.2 Proof — Compound Index Prefix Rule
-Compound indexes sort entries lexicographically (like a phonebook sorted by `Last_Name, First_Name`).
-- Searching by `Last_Name` narrows entries to a contiguous section.
-- Searching by `First_Name` alone forces a scan of the entire phonebook because `First_Name` values are scattered across every `Last_Name` section.
-
-### 4.3 Worked Code Example
+### 5.2 Geospatial Indexing (`2dsphere`) & Geohashing
+- **`2dsphere` Index:** Supports spherical coordinates (Earth geometry) using GeoJSON Point formats: `{"type": "Point", "coordinates": [longitude, latitude]}`.
+- **Proximity Search (`$near`):**
 ```python
-# Create a compound index on status (ascending) and createdAt (descending)
-orders.create_index([("status", 1), ("createdAt", -1)])
-
-# Uses Index (matches prefix 'status')
-orders.find({"status": "shipped"}) 
-
-# DOES NOT use index efficiently (skips prefix 'status')
-orders.find({"createdAt": {"$gte": start_date}}) 
-```
-
----
-
-## 5. GeoSpatial Indexing
-
-### 5.1 Core Concepts (Simplified)
-- **`2dsphere` Index:** Supports spherical map coordinates (GeoJSON points, lines, polygons).
-- **Geohashing:** Converts 2D latitude/longitude coordinates into a 1D string by recursively dividing map areas into quadtree grid cells.
-- **Proximity Locality:** Nearby physical locations get identical or similar geohash prefixes, allowing standard B-trees to perform fast radius searches (`$near`, `$geoWithin`).
-
-### 5.2 Worked Code Example
-```python
-# Create geospatial index on 'location' field
 stores.create_index([("location", "2dsphere")])
 
-# Find stores within 5,000 meters (5 km) of a point
-stores.find({
+# Find all stores within 5,000 meters of a coordinate
+nearby_stores = stores.find({
     "location": {
         "$near": {
-            "$geometry": {"type": "Point", "coordinates": [-73.98, 40.75]},
+            "$geometry": {"type": "Point", "coordinates": [-73.985, 40.748]},
             "$maxDistance": 5000
         }
     }
@@ -149,119 +213,191 @@ stores.find({
 
 ---
 
-## 6. Upserts in MongoDB
+## 6. Atomic Upserts & Find-and-Modify Operations
 
-### 6.1 Core Concepts (Simplified)
-- **Upsert (`upsert=True`):** Updates a document if it exists, or inserts a new document if it does not.
-- **Atomic Safety:** Combines check-and-insert into a single atomic database operation, eliminating race conditions (Check-Then-Act bugs) under concurrent web requests.
-
-### 6.2 Worked Code Example
+### 6.1 Upserts (`upsert=True` & `$setOnInsert`)
+Eliminates Check-Then-Act race conditions by performing update-or-insert atomically:
 ```python
-orders.update_one(
-    {"externalOrderId": "EXT-9981"},
+# Updates counter if document exists; initializes creation fields if newly inserted
+analytics.update_one(
+    {"page": "/dashboard", "date": "2026-08-14"},
     {
-        "$set": {"status": "shipped"},
-        "$setOnInsert": {"createdAt": current_time}  # Only set on insert
+        "$inc": {"views": 1},
+        "$setOnInsert": {"created_at": datetime.utcnow(), "initial_referrer": "direct"}
     },
     upsert=True
 )
 ```
 
+### 6.2 Atomic Find-and-Modify (`find_one_and_update`)
+Useful for distributed task workers checking out pending jobs atomically:
+```python
+job = task_queue.find_one_and_update(
+    {"status": "queued"},
+    {"$set": {"status": "in_progress", "worker_id": "worker_42", "started_at": datetime.utcnow()}},
+    sort=[("priority", -1)],
+    return_document=pymongo.ReturnDocument.AFTER
+)
+```
+
 ---
 
-## 7. Aggregation Framework, Replication, and Sharding
+## 7. The Aggregation Framework — Single-Purpose Aggregations & Multi-Stage Pipelines
 
-### 7.1 Core Concepts (Simplified)
-- **Aggregation Pipeline:** Passes documents through sequential transformation stages:
-  - `$match`: Filters documents (like `WHERE`).
-  - `$group`: Aggregates values by key (like `GROUP BY`).
-  - `$project`: Reshapes output fields (like `SELECT`).
-  - `$sort`: Orders results.
-  - `$lookup`: Performs left-outer-joins between collections.
-- **Replication (Replica Set):** 1 Primary node (handles writes) + multiple Secondary nodes (replicate data for high availability and read scaling).
-- **Sharding:** Distributes large collections across multiple server shards using a **Shard Key** (often hashed to prevent write bottlenecks on a single shard).
+### 7.1 Single-Purpose Aggregation Methods
+```python
+# Fast metadata count
+approx_count = orders.estimated_document_count()
 
-### 7.2 Worked Code Example (Aggregation Pipeline)
-Calculate total revenue by category, sorted highest first:
+# Exact filtered count
+exact_count = orders.count_documents({"status": "shipped"})
+
+# Distinct values for an attribute
+unique_countries = users.distinct("profile.address.country", {"status": "active"})
+```
+
+### 7.2 Aggregation Pipeline Architecture & RAM Constraints
+- **Pipeline Processing:** Documents stream through sequential stages ($[\text{Stage}_1] \to [\text{Stage}_2] \to \dots$).
+- **RAM Limits:** Each stage is restricted to **100 MB of RAM** by default. Pass `allowDiskUse=True` to spill large sort/group operations to temporary disk files.
+
+### 7.3 Complete Pipeline Stages Summary
+
+| Stage | Purpose | SQL Analogy |
+|---|---|---|
+| `$match` | Filters documents passing into subsequent stages | `WHERE` |
+| `$project` | Reshapes documents, selects/excludes fields, creates computed expressions | `SELECT` |
+| `$group` | Groups documents by key and computes accumulators (`$sum`, `$avg`, `$min`, `$max`) | `GROUP BY` |
+| `$sort` | Orders documents | `ORDER BY` |
+| `$limit` / `$skip` | Pagination control | `LIMIT` / `OFFSET` |
+| `$unwind` | Deconstructs an array field into individual documents per array element | *Flatten / Table-Valued Function* |
+| `$lookup` | Performs left outer joins to another collection | `LEFT OUTER JOIN` |
+| `$addFields` | Appends computed fields without dropping existing fields | *Computed columns* |
+| `$facet` | Processes multiple independent sub-pipelines in parallel | *Multi-dimensional reporting* |
+| `$out` / `$merge` | Writes pipeline results into a target collection | `INSERT INTO ... SELECT` |
+
+### 7.4 Worked Aggregation Pipeline Example
 ```python
 pipeline = [
-    {"$match": {"createdAt": {"$gte": start_date}}},
-    {"$group": {"_id": "$category", "total_sales": {"$sum": "$amount"}}},
-    {"$sort": {"total_sales": -1}}
+    # 1. Filter completed orders from 2026
+    {"$match": {"status": "completed", "year": 2026}},
+
+    # 2. Deconstruct line items array
+    {"$unwind": "$items"},
+
+    # 3. Filter only high-value items
+    {"$match": {"items.price": {"$gte": 50}}},
+
+    # 4. Group by category and compute total sales and average item quantity
+    {
+        "$group": {
+            "_id": "$items.category",
+            "total_revenue": {"$sum": {"$multiply": ["$items.price", "$items.qty"]}},
+            "avg_qty": {"$avg": "$items.qty"},
+            "item_count": {"$count": {}}
+        }
+    },
+
+    # 5. Sort highest revenue first
+    {"$sort": {"total_revenue": -1}},
+
+    # 6. Limit to top 5 categories
+    {"$limit": 5}
 ]
-results = list(orders.aggregate(pipeline))
+
+results = list(orders.aggregate(pipeline, allowDiskUse=True))
 ```
 
 ---
 
-## 8. Document Database with Web Frameworks — Django & MongoDB
+## 8. Document Database with Web Frameworks — Django & MongoEngine ODM
 
-### 8.1 Core Concepts (Simplified)
-- Django's default ORM is built for SQL databases (tables, foreign keys).
-- Connecting Django to MongoDB uses an **Object-Document Mapper (ODM)** like MongoEngine, requiring developers to choose between:
-  1. **Embedding Documents:** Fast single-query reads, but shares document lifecycle.
-  2. **Referencing Documents:** Independent document lifecycles, but requires application-level query joins.
+Django's built-in ORM is designed for SQL tables. Integrating Django with MongoDB uses an Object-Document Mapper (ODM) such as **MongoEngine**:
 
-### 8.2 Worked Code Example (MongoEngine)
 ```python
-from mongoengine import Document, EmbeddedDocument, StringField, ListField, EmbeddedDocumentField
+from mongoengine import Document, EmbeddedDocument, StringField, DecimalField, ListField, EmbeddedDocumentField
 
-class LineItem(EmbeddedDocument):
-    sku = StringField()
-    qty = StringField()
+class OrderItem(EmbeddedDocument):
+    sku = StringField(required=True)
+    quantity = DecimalField(default=1)
+    price = DecimalField(required=True)
 
-class Order(Document):
-    customer = StringField()
-    items = ListField(EmbeddedDocumentField(LineItem))  # Embedded documents
+class CustomerOrder(Document):
+    customer_id = StringField(required=True)
+    status = StringField(default="pending")
+    items = ListField(EmbeddedDocumentField(OrderItem)) # Embedded sub-documents
 
-# Fetching an order gets items in a single round-trip query
-order = Order.objects(customer="Alice").first()
+    meta = {
+        'collection': 'customer_orders',
+        'indexes': ['customer_id', 'status']
+    }
+
+# Querying via MongoEngine
+order = CustomerOrder.objects(customer_id="CUST-100", status="pending").first()
 ```
 
 ---
 
-## 9. Document Database with Web Frameworks — Flask & MongoDB
+## 9. Document Database with Web Frameworks — Flask & PyMongo REST API
 
-### 9.1 Core Concepts (Simplified)
-- Flask is lightweight and unopinionated, making it easy to use with MongoDB.
-- Best practice: Initialize a single `MongoClient` object at application startup and share it across HTTP route functions.
+Flask provides a lightweight, thread-safe environment to expose MongoDB collections via RESTful endpoints:
 
-### 9.2 Worked Code Example (Flask Application)
 ```python
 from flask import Flask, request, jsonify
 from pymongo import MongoClient
 from bson import ObjectId
+import datetime
 
 app = Flask(__name__)
 
-# Initialize client once at application startup
-client = MongoClient("mongodb://localhost:27017/")
-notes_collection = client["noteapp"]["notes"]
+# Initialize single global connection pool
+mongo_client = MongoClient("mongodb://localhost:27017/", maxPoolSize=25)
+notes_collection = mongo_client["notes_db"]["notes"]
 
-@app.route("/notes", methods=["POST"])
+@app.route("/api/notes", methods=["POST"])
 def create_note():
-    data = request.json
-    result = notes_collection.insert_one({"title": data["title"], "body": data["body"]})
-    return jsonify({"id": str(result.inserted_id)}), 201
+    payload = request.get_json()
+    new_note = {
+        "title": payload["title"],
+        "body": payload["body"],
+        "tags": payload.get("tags", []),
+        "created_at": datetime.datetime.utcnow()
+    }
+    result = notes_collection.insert_one(new_note)
+    return jsonify({"id": str(result.inserted_id), "status": "created"}), 201
 
-@app.route("/notes/<note_id>", methods=["GET"])
-def get_note(note_id):
-    note = notes_collection.find_one({"_id": ObjectId(note_id)})
-    if note:
-        return jsonify({"title": note["title"], "body": note["body"]})
-    return jsonify({"error": "Not found"}), 404
+@app.route("/api/notes/<note_id>", methods=["PATCH"])
+def update_note_field(note_id):
+    payload = request.get_json()
+    # Supports dynamic single/multi field updates via $set
+    result = notes_collection.update_one(
+        {"_id": ObjectId(note_id)},
+        {"$set": payload}
+    )
+    if result.matched_count == 0:
+        return jsonify({"error": "Note not found"}), 404
+    return jsonify({"status": "updated"}), 200
+
+if __name__ == "__main__":
+    app.run(port=5000)
 ```
 
 ---
 
 ## Practice Problems & Solutions
 
-1. **Query Operators:** Write a PyMongo query to find products with `category` in `["electronics", "toys"]` and `price >= 50`.
-   * *Solution:* `db.products.find({"category": {"$in": ["electronics", "toys"]}, "price": {"$gte": 50}})`
-2. **Index Usage:** Does index `{"a": 1, "b": 1, "c": 1}` optimize a query filtering on `{"b": 2, "c": 3}`?
-   * *Solution:* **No.** It skips leading field `"a"`, violating the compound index prefix rule.
-3. **Atomic Counter:** Increment page views for path `"/home"`, creating it if it doesn't exist.
-   * *Solution:* `db.pageviews.update_one({"page": "/home"}, {"$inc": {"views": 1}}, upsert=True)`
+1. **Positional Update:** A document contains `scores: [85, 92, 78, 95]`. Write a PyMongo command to increment all scores below 80 by 5 points.
+   * *Solution:*
+     ```python
+     db.students.update_one(
+         {"_id": student_id},
+         {"$inc": {"scores.$[elem]": 5}},
+         array_filters=[{"elem": {"$lt": 80}}]
+     )
+     ```
+2. **Aggregation Stage Ordering:** Why should `$match` be positioned before `$unwind` in an aggregation pipeline?
+   * *Solution:* Placing `$match` first filters out non-relevant documents before array expansion. Unwinding prior to filtering unnecessarily duplicates millions of array sub-documents into memory, causing high CPU/RAM overhead and cache thrashing.
+3. **Compound Index Prefix:** Given index `{"country": 1, "city": 1, "postal_code": 1}`, will it accelerate a query filtering on `{"city": "Austin", "postal_code": "78701"}`?
+   * *Solution:* **No.** The query skips the leading prefix attribute `"country"`, violating the B-tree compound index prefix rule and resulting in a full collection scan (`COLLSCAN`).
 
 ---
 
@@ -269,10 +405,10 @@ def get_note(note_id):
 
 | Concept | Key Takeaway |
 |---|---|
-| **`MongoClient`** | Create once at app startup to reuse the connection pool across HTTP requests. |
-| **Partial Updates (`$set`)** | Updates targeted fields safely without overwriting concurrent edits on other fields. |
-| **Index Prefix Rule** | Queries must filter on leading fields of a compound index to utilize it. |
-| **Geohashing** | Maps 2D coordinates to 1D strings so standard B-trees can run spatial proximity queries. |
-| **Upserts** | Prevents race conditions by atomically updating or inserting in a single operation. |
-| **Aggregation Pipelines** | Multi-stage document processing (`$match` $\to$ `$group` $\to$ `$sort`). |
-| **Flask Integration** | Share a single `MongoClient` instance globally across route handlers. |
+| **`MongoClient` Singleton** | Create once at app startup to amortize TCP/TLS handshake latencies across all threads. |
+| **Adding / Updating Columns** | Use `$set` for singular/multiple fields; dot-notation for nested documents. |
+| **Removing Columns** | Use `$unset: {"field_name": ""}`. |
+| **Positional Operators** | `$` (first matched), `$[]` (all elements), `$[elem]` + `array_filters` (conditional elements). |
+| **Atomic Upserts** | `upsert=True` with `$setOnInsert` ensures race-condition-free check-and-insert. |
+| **Aggregation Pipelines** | Multi-stage streaming transformations with 100MB RAM stage limit (`allowDiskUse=True`). |
+| **`$unwind` & `$lookup`** | `$unwind` flattens array elements into discrete documents; `$lookup` performs left outer joins. |

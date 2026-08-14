@@ -210,7 +210,7 @@ DROP CONSTRAINT unique_person_name IF EXISTS
 - **Range**: `n.age > 25 AND n.age < 50`
 - **Logical**: `AND`, `OR`, `NOT`, `XOR`
 - **List membership**: `'admin' IN n.roles`
-- **Exists property**: `exists(n.email)`
+- **Property existence**: `n.email IS NOT NULL` (or pattern existence `EXISTS { MATCH (n)-[:KNOWS]->() }`)
 
 ### Advanced pattern matching
 
